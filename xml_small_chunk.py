@@ -1,17 +1,37 @@
 import xml.etree.ElementTree as ET
 import os
+import sys
 
-def split_large_xml(file_path, output_dir, parent_tag, chunk_size=100):
+def detect_parent_tag(file_path):
+    """
+    Detects the first non-root tag in the XML file.
+
+    :param file_path: Path to the XML file.
+    :return: Detected parent tag.
+    """
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if "</" in line:
+                tag_start = line.find("</") + 2
+                tag_end = line.find(">", tag_start)
+                if tag_start != -1 and tag_end != -1:
+                    return line[tag_start:tag_end]
+    raise ValueError("Could not detect a parent tag in the XML file.")
+
+def split_large_xml(file_path, output_dir, chunk_size=100):
     """
     Splits a large XML file into smaller files.
 
     :param file_path: Path to the large XML file.
     :param output_dir: Directory where smaller chunks will be saved.
-    :param parent_tag: The parent tag used to group chunks.
     :param chunk_size: Number of child elements per chunk.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
+    # Detect the parent tag
+    parent_tag = detect_parent_tag(file_path)
+    print(f"Detected parent tag: <{parent_tag}>")
 
     # Parse the XML file
     context = ET.iterparse(file_path, events=("start", "end"))
@@ -54,11 +74,18 @@ def write_chunk(output_dir, root_tag, elements, chunk_count):
             f.write(ET.tostring(element, encoding="utf-8"))
         f.write(f"</{root_tag}>\n".encode("utf-8"))
 
-# Example Usage
 if __name__ == "__main__":
-    file_path = "large_file.xml"  # Replace with your large XML file path
-    output_dir = "output_chunks"  # Directory to save chunks
-    parent_tag = "record"  # Replace with the tag you want to split on
+    if len(sys.argv) != 2:
+        print("Usage: python split_large_xml.py <XML_FILE_PATH>")
+        sys.exit(1)
+
+    file_path = sys.argv[1]
+
+    if not os.path.isfile(file_path):
+        print(f"Error: File '{file_path}' not found.")
+        sys.exit(1)
+
+    output_dir = "./xml_chunk_output"  # Fixed output directory
     chunk_size = 100  # Number of elements per chunk
 
-    split_large_xml(file_path, output_dir, parent_tag, chunk_size)
+    split_large_xml(file_path, output_dir, chunk_size)
