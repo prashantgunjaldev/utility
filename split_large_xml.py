@@ -4,24 +4,22 @@ import sys
 
 def detect_parent_tag(file_path):
     """
-    Detects the first non-root tag in the XML file.
+    Detects the child tag in the XML file under the root (i.e., <book>).
 
     :param file_path: Path to the XML file.
-    :return: Detected parent tag.
+    :return: Detected child tag (like <book>).
     """
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
-                if "</" in line:
-                    tag_start = line.find("</") + 2
-                    tag_end = line.find(">", tag_start)
-                    if tag_start != -1 and tag_end != -1:
-                        return line[tag_start:tag_end]
+                # Look for the first non-root element (which will be <book>)
+                if "<book" in line:
+                    return "book"  # Return the child tag (<book>) directly
     except Exception as e:
         raise ValueError(f"Error detecting parent tag: {e}")
     raise ValueError("Could not detect a parent tag in the XML file.")
 
-def split_large_xml(file_path, output_dir, chunk_size=100):
+def split_large_xml(file_path, output_dir, chunk_size=1):
     """
     Splits a large XML file into smaller files.
 
@@ -42,10 +40,10 @@ def split_large_xml(file_path, output_dir, chunk_size=100):
         print(f"Error: Failed to create or access output directory '{output_dir}'. {e}")
         sys.exit(1)
 
-    # Detect the parent tag
+    # Detect the child tag (like <book>)
     try:
         parent_tag = detect_parent_tag(file_path)
-        print(f"Detected parent tag: <{parent_tag}>")
+        print(f"Detected child tag: <{parent_tag}>")
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
@@ -113,7 +111,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     output_dir = "./xml_chunk_output"  # Fixed output directory
-    chunk_size = 100  # Number of elements per chunk
+    chunk_size = 1  # Number of elements per chunk
 
     # Start the XML splitting process
     split_large_xml(file_path, output_dir, chunk_size)
