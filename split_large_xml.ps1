@@ -1,7 +1,7 @@
 param (
-    [string]$FilePath,   # Path to the large XML file
-    [int]$ChunkSize = 100,  # Number of elements per chunk
-    [string]$OutputDir = "./xml_chunk_output"  # Directory for output chunks
+    [string]$FilePath,              # Path to the large XML file
+    [int]$ChunkSize = 100,          # Number of elements per chunk
+    [string]$OutputDir = "./xml_chunk_output" # Directory for output chunks
 )
 
 # Check if file exists
@@ -32,7 +32,7 @@ Write-Host "Detected parent tag: <$ParentTag>"
 # Initialize variables
 $ChunkCount = 0
 $RecordCount = 0
-$ChunkFile = ""
+$ChunkFile = $null
 $CurrentChunk = @()
 
 # Process the XML file line by line
@@ -48,11 +48,13 @@ Get-Content $FilePath | ForEach-Object {
         $ChunkCount++
         $ChunkFile = "$OutputDir/chunk_$ChunkCount.xml"
         Write-Host "Creating $ChunkFile"
-        Set-Content -Path $ChunkFile -Value "<root>"
+        Set-Content -Path $ChunkFile -Value "<root>" # Write the root tag to the new chunk
     }
 
     # Add the current line to the current chunk
-    Add-Content -Path $ChunkFile -Value $line
+    if ($ChunkFile) {
+        Add-Content -Path $ChunkFile -Value $line
+    }
 
     # Close the chunk when the limit is reached
     if ($line -match "</$ParentTag>" -and $RecordCount % $ChunkSize -eq 0) {
@@ -61,7 +63,7 @@ Get-Content $FilePath | ForEach-Object {
 }
 
 # Finalize the last chunk if it is not closed
-if ($RecordCount % $ChunkSize -ne 0) {
+if ($RecordCount % $ChunkSize -ne 0 -and $ChunkFile) {
     Add-Content -Path $ChunkFile -Value "</root>"
 }
 
