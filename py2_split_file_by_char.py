@@ -1,28 +1,24 @@
-param(
-    [string]$FileName,
-    [int]$ChunkSize
-)
+import sys
+import os
 
-if (-not $FileName -or -not $ChunkSize) {
-    Write-Host "Usage: powershell -File split_file.ps1 -FileName <file_name> -ChunkSize <chunk_size>"
-    exit
-}
+def split_file(file_name, chunk_size):
+    try:
+        chunk_size = int(chunk_size)
+        with open(file_name, 'r') as f:
+            content = f.read()
+        
+        base_name, ext = os.path.splitext(file_name)
+        for i in range(0, len(content), chunk_size):
+            chunk = content[i:i+chunk_size]
+            chunk_file_name = "{}_part_{}{}".format(base_name, i // chunk_size + 1, ext)
+            with open(chunk_file_name, 'w') as chunk_file:
+                chunk_file.write(chunk)
+            print("Created:", chunk_file_name)
+    except Exception as e:
+        print("Error:", e)
 
-try {
-    $Content = Get-Content -Raw -Path $FileName
-    $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
-    $Extension = [System.IO.Path]::GetExtension($FileName)
-
-    $Chunks = @()
-    for ($i = 0; $i -lt $Content.Length; $i += $ChunkSize) {
-        $Chunks += $Content.Substring($i, [Math]::Min($ChunkSize, $Content.Length - $i))
-    }
-
-    for ($j = 0; $j -lt $Chunks.Count; $j++) {
-        $ChunkFileName = "{0}_part_{1}{2}" -f $BaseName, ($j + 1), $Extension
-        $Chunks[$j] | Set-Content -Path $ChunkFileName
-        Write-Host "Created: $ChunkFileName"
-    }
-} catch {
-    Write-Host "Error: $_"
-}
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python split_file.py <file_name> <chunk_size>")
+    else:
+        split_file(sys.argv[1], sys.argv[2])
