@@ -1,0 +1,118 @@
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.RestTemplate;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class DecentralizedDatasetUtilTest {
+
+    @Mock
+    private RestTemplate restTemplate;
+
+    @InjectMocks
+    private DecentralizedDatasetUtil decentralizedDatasetUtil;
+
+    private static final String URL = "";
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void testPost_success() {
+        // Arrange
+        DatasetResponse dummyResponse = new DatasetResponse();
+        dummyResponse.setMessage("Dataset created successfully");
+        ResponseEntity<DatasetResponse> responseEntity = new ResponseEntity<>(dummyResponse, HttpStatus.CREATED);
+
+        when(restTemplate.exchange(
+                eq(URL),
+                eq(HttpMethod.POST),
+                any(),
+                eq(DatasetResponse.class)
+        )).thenReturn(responseEntity);
+
+        // Act
+        ResponseEntity<DatasetResponse> result = decentralizedDatasetUtil.post(null);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(HttpStatus.CREATED, result.getStatusCode());
+        assertEquals("Dataset created successfully", result.getBody().getMessage());
+    }
+
+    @Test
+    void testPost_failure() {
+        // Arrange
+        DatasetResponse dummyResponse = new DatasetResponse();
+        dummyResponse.setMessage("Failed to create dataset");
+        ResponseEntity<DatasetResponse> responseEntity = new ResponseEntity<>(dummyResponse, HttpStatus.BAD_REQUEST);
+
+        when(restTemplate.exchange(
+                eq(URL),
+                eq(HttpMethod.POST),
+                any(),
+                eq(DatasetResponse.class)
+        )).thenReturn(responseEntity);
+
+        // Act & Assert
+        Exception exception = assertThrows(FeedProcessingServiceException.class, () ->
+                decentralizedDatasetUtil.post(null)
+        );
+
+        assertTrue(exception.getMessage().contains("UNABLE_TO_CREATE_DATASET"));
+    }
+
+    @Test
+    void testPut_success() {
+        // Arrange
+        DatasetResponse dummyResponse = new DatasetResponse();
+        dummyResponse.setMessage("Dataset updated successfully");
+        ResponseEntity<DatasetResponse> responseEntity = new ResponseEntity<>(dummyResponse, HttpStatus.OK);
+
+        when(restTemplate.exchange(
+                eq(URL),
+                eq(HttpMethod.PUT),
+                any(),
+                eq(DatasetResponse.class)
+        )).thenReturn(responseEntity);
+
+        // Act
+        ResponseEntity<DatasetResponse> result = decentralizedDatasetUtil.put(null);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(HttpStatus.OK, result.getStatusCode());
+        assertEquals("Dataset updated successfully", result.getBody().getMessage());
+    }
+
+    @Test
+    void testPut_failure() {
+        // Arrange
+        DatasetResponse dummyResponse = new DatasetResponse();
+        dummyResponse.setMessage("Failed to update dataset");
+        ResponseEntity<DatasetResponse> responseEntity = new ResponseEntity<>(dummyResponse, HttpStatus.BAD_REQUEST);
+
+        when(restTemplate.exchange(
+                eq(URL),
+                eq(HttpMethod.PUT),
+                any(),
+                eq(DatasetResponse.class)
+        )).thenReturn(responseEntity);
+
+        // Act & Assert
+        Exception exception = assertThrows(RuntimeException.class, () ->
+                decentralizedDatasetUtil.put(null)
+        );
+
+        assertTrue(exception.getMessage().contains("UNABLE_TO_UPDATE_DATASET_CODE"));
+    }
+}
