@@ -11,6 +11,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
+import java.util.List;
+
 class DataProviderMigrationServiceImplTest {
 
     @InjectMocks
@@ -25,39 +28,70 @@ class DataProviderMigrationServiceImplTest {
     @Mock
     private DatasetResponseUtil datasetResponseUtil;
 
+    @Mock
+    private FileSchema fileSchema;
+
+    @Mock
+    private FileFeed fileFeed;
+
+    @Mock
+    private DatasetResponse datasetResponse;
+
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
     }
 
     @Test
-    void testSaveCSVSchemaToDataset_Success() {
+    void testUpdateHeaderSchemaInDataset_Success() {
         // Arrange
-        FileSchema fileSchema = mock(FileSchema.class);
-        Dataset dataset = new Dataset();
-        DatasetResponse mockResponse = new DatasetResponse();
-        mockResponse.setDatasetId("123");
-        ResponseEntity<DatasetResponse> mockEntity = new ResponseEntity<>(mockResponse, HttpStatus.OK);
+        List<String> feeds = new ArrayList<>();
+        feeds.add("feed1");
+        when(fileFeed.getFeedId()).thenReturn("feed1");
 
-        when(fileSchema.getParserType()).thenReturn(ParserType.CSV);
-        when(fileSchema.getDatasetId()).thenReturn(null);
+        DatasetRequestDTO datasetRequestToUpdate = new DatasetRequestDTO();
+        ResponseEntity<DatasetResponse> mockResponseEntity = new ResponseEntity<>(datasetResponse, HttpStatus.OK);
 
-        when(datasetMapper.mapCSVSchemaToDataset(fileSchema)).thenReturn(dataset);
+        when(fileSchema.getDatasetId()).thenReturn("123");
+        when(datasetResponse.getDatasetId()).thenReturn("123");
         when(restTemplate.exchange(
                 eq("feedProcessingConfigURL" + Constants.URL_DATASET_CREATE_SINGLE_DATASET),
-                eq(HttpMethod.POST),
+                eq(HttpMethod.PUT),
                 any(),
                 eq(DatasetResponse.class)
-        )).thenReturn(mockEntity);
+        )).thenReturn(mockResponseEntity);
 
         // Act
-        dataProviderMigrationService.saveCSVSchemaToDataset(fileSchema, "feedId", "feedGroupId", false);
+        dataProviderMigrationService.updateHeaderSchemaInDataset(fileSchema, feeds, "feedGroupId", fileFeed, datasetResponse);
 
         // Assert
-        verify(datasetMapper, times(1)).mapCSVSchemaToDataset(fileSchema);
-        verify(restTemplate, times(1)).exchange(anyString(), eq(HttpMethod.POST), any(), eq(DatasetResponse.class));
-        assertEquals("123", fileSchema.getDatasetId());
+        verify(restTemplate, times(1)).exchange(anyString(), eq(HttpMethod.PUT), any(), eq(DatasetResponse.class));
+        verify(datasetMapper, times(1)).addHeaderColumns(any(), eq(fileSchema));
     }
 
     @Test
-    void testSaveCSVSchemaTo
+    void testUpdateHeaderSchemaInDataset_Failure() {
+        // Arrange
+        List<String> feeds = new ArrayList<>();
+        feeds.add("feed1");
+        when(fileFeed.getFeedId()).thenReturn("feed1");
+
+        DatasetRequestDTO datasetRequestToUpdate = new DatasetRequestDTO();
+        ResponseEntity<DatasetResponse> mockResponseEntity = new ResponseEntity<>(null, HttpStatus.BAD_REQUEST);
+
+        when(fileSchema.getDatasetId()).thenReturn("123");
+        when(datasetResponse.getDatasetId()).thenReturn("123");
+        when(restTemplate.exchange(
+                eq("feedProcessingConfigURL" + Constants.URL_DATASET_CREATE_SINGLE_DATASET),
+                eq(HttpMethod.PUT),
+                any(),
+                eq(DatasetResponse.class)
+        )).thenReturn(mockResponseEntity);
+
+        // Act & Assert
+        RuntimeException exception = assertThrows(RuntimeException.class, () ->
+                dataProviderMigrationService.updateHeaderSchemaInDataset(fileSchema, feeds, "feedGroupId", fileFeed, datasetResponse)
+        );
+        assertTrue(exception.getMessage().contains("Unable to update dataset"));
+    }
+}
