@@ -11,13 +11,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
-class XMLSchemaDatasetServiceTest {
+class DataProviderMigrationServiceImplTest {
 
     @InjectMocks
-    private XMLSchemaDatasetService xmlSchemaDatasetService;
+    private DataProviderMigrationServiceImpl dataProviderMigrationService;
 
     @Mock
     private RestTemplate restTemplate;
+
+    @Mock
+    private DatasetMapper datasetMapper;
 
     @Mock
     private DatasetResponseUtil datasetResponseUtil;
@@ -28,93 +31,33 @@ class XMLSchemaDatasetServiceTest {
     }
 
     @Test
-    void testUpdateDataset_Success() {
+    void testSaveCSVSchemaToDataset_Success() {
         // Arrange
-        DatasetRequestDTO datasetRequestDTO = new DatasetRequestDTO();
-        String datasetId = "123";
-        DatasetResponse mockResponse = new DatasetResponse();
-        ResponseEntity<DatasetResponse> mockEntity = new ResponseEntity<>(mockResponse, HttpStatus.OK);
-
-        when(restTemplate.exchange(
-                eq("feedProcessingConfigURL" + Constants.LR_DATASET_URL + "/" + datasetId),
-                eq(HttpMethod.PUT),
-                any(),
-                eq(DatasetResponse.class)
-        )).thenReturn(mockEntity);
-
-        when(datasetResponseUtil.put(any())).thenReturn(mockResponse);
-
-        // Act
-        DatasetResponse result = xmlSchemaDatasetService.updateDataset(datasetRequestDTO, datasetId);
-
-        // Assert
-        assertNotNull(result);
-        verify(restTemplate, times(1)).exchange(anyString(), eq(HttpMethod.PUT), any(), eq(DatasetResponse.class));
-        verify(datasetResponseUtil, times(1)).put(any());
-    }
-
-    @Test
-    void testUpdateDataset_Failure() {
-        // Arrange
-        DatasetRequestDTO datasetRequestDTO = new DatasetRequestDTO();
-        String datasetId = "123";
-        ResponseEntity<DatasetResponse> mockEntity = new ResponseEntity<>(null, HttpStatus.BAD_REQUEST);
-
-        when(restTemplate.exchange(
-                eq("feedProcessingConfigURL" + Constants.LR_DATASET_URL + "/" + datasetId),
-                eq(HttpMethod.PUT),
-                any(),
-                eq(DatasetResponse.class)
-        )).thenReturn(mockEntity);
-
-        // Act & Assert
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> 
-            xmlSchemaDatasetService.updateDataset(datasetRequestDTO, datasetId)
-        );
-        assertTrue(exception.getMessage().contains("Unable to update dataset"));
-    }
-
-    @Test
-    void testCreateDataset_Success() {
-        // Arrange
-        DatasetRequestDTO datasetRequestDTO = new DatasetRequestDTO();
+        FileSchema fileSchema = mock(FileSchema.class);
+        Dataset dataset = new Dataset();
         DatasetResponse mockResponse = new DatasetResponse();
         mockResponse.setDatasetId("123");
         ResponseEntity<DatasetResponse> mockEntity = new ResponseEntity<>(mockResponse, HttpStatus.OK);
 
+        when(fileSchema.getParserType()).thenReturn(ParserType.CSV);
+        when(fileSchema.getDatasetId()).thenReturn(null);
+
+        when(datasetMapper.mapCSVSchemaToDataset(fileSchema)).thenReturn(dataset);
         when(restTemplate.exchange(
-                eq("feedProcessingConfigURL" + Constants.URL_DATASET),
+                eq("feedProcessingConfigURL" + Constants.URL_DATASET_CREATE_SINGLE_DATASET),
                 eq(HttpMethod.POST),
                 any(),
                 eq(DatasetResponse.class)
         )).thenReturn(mockEntity);
 
         // Act
-        DatasetResponse result = xmlSchemaDatasetService.createDataset(datasetRequestDTO);
+        dataProviderMigrationService.saveCSVSchemaToDataset(fileSchema, "feedId", "feedGroupId", false);
 
         // Assert
-        assertNotNull(result);
-        assertEquals("123", result.getDatasetId());
+        verify(datasetMapper, times(1)).mapCSVSchemaToDataset(fileSchema);
         verify(restTemplate, times(1)).exchange(anyString(), eq(HttpMethod.POST), any(), eq(DatasetResponse.class));
+        assertEquals("123", fileSchema.getDatasetId());
     }
 
     @Test
-    void testCreateDataset_Failure() {
-        // Arrange
-        DatasetRequestDTO datasetRequestDTO = new DatasetRequestDTO();
-        ResponseEntity<DatasetResponse> mockEntity = new ResponseEntity<>(null, HttpStatus.BAD_REQUEST);
-
-        when(restTemplate.exchange(
-                eq("feedProcessingConfigURL" + Constants.URL_DATASET),
-                eq(HttpMethod.POST),
-                any(),
-                eq(DatasetResponse.class)
-        )).thenReturn(mockEntity);
-
-        // Act & Assert
-        FeedProcessingServiceException exception = assertThrows(FeedProcessingServiceException.class, () -> 
-            xmlSchemaDatasetService.createDataset(datasetRequestDTO)
-        );
-        assertTrue(exception.getMessage().contains("Unable to create dataset"));
-    }
-}
+    void testSaveCSVSchemaTo
