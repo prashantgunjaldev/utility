@@ -6,22 +6,23 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpEntity;
 
-import java.util.ArrayList;
-import java.util.List;
-
-class FileFeedServiceImplTest {
-
-    @InjectMocks
-    private FileFeedServiceImpl fileFeedService;
+class AlertingServiceTest {
 
     @Mock
-    private DatasetMapper datasetMapper;
+    private ObjectMapper objectMapper;
 
     @Mock
     private RestTemplate restTemplate;
+
+    @Mock
+    private AADSecurityUtil aadSecurityUtil;
+
+    @InjectMocks
+    private AlertingService alertingService;
 
     @BeforeEach
     void setUp() {
@@ -29,37 +30,125 @@ class FileFeedServiceImplTest {
     }
 
     @Test
-    void testSaveCSVSchemaToDataset() {
-        // Mocking inputs
-        FileSchema fileSchema = mock(FileSchema.class);
-        when(fileSchema.getParserType()).thenReturn(ParserType.CSV);
-        when(fileSchema.getDatasetId()).thenReturn("123");
+    void testCreateAlertConfiguration_Success() throws Exception {
+        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
+        alertMetadata.setFeedId("feedId");
+        alertMetadata.setVendorId("vendorId");
+        alertMetadata.setFeedGroupId("feedGroupId");
 
-        String fileFeedId = "feed123";
-        String feedGroupId = "group123";
-        Boolean isMultipleSchema = false;
+        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
+        AlertingMetadataResponse mockResponse = new AlertingMetadataResponse();
+        mockResponse.setId("testId");
+        when(mockResponseEntity.getStatusCodeValue()).thenReturn(201);
+        when(mockResponseEntity.getBody()).thenReturn(mockResponse);
+        when(restTemplate.exchange(
+                eq("acquisitionAlertingServiceUrl/v1/createAlertMetadata"),
+                eq(HttpMethod.POST),
+                any(HttpEntity.class),
+                eq(AlertingMetadataResponse.class)
+        )).thenReturn(mockResponseEntity);
 
-        // Mocking DatasetMapper methods
-        doNothing().when(datasetMapper).addTechnicalColumns(any(Dataset.class), eq(isMultipleSchema));
-        doNothing().when(datasetMapper).addHeaderColumns(any(Dataset.class));
+        FeedAlertMetadataResponse result = alertingService.createAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId");
 
-        // Mocking RestTemplate call
-        ResponseEntity<String> mockResponse = new ResponseEntity<>("Success", HttpStatus.CREATED);
+        assertNotNull(result);
+        assertEquals("testId", result.getId());
+    }
+
+    @Test
+    void testCreateAlertConfiguration_Failure() {
+        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
+
+        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
+        when(mockResponseEntity.getStatusCodeValue()).thenReturn(400);
         when(restTemplate.exchange(
                 anyString(),
                 eq(HttpMethod.POST),
-                any(),
-                eq(String.class)
-        )).thenReturn(mockResponse);
+                any(HttpEntity.class),
+                eq(AlertingMetadataResponse.class)
+        )).thenReturn(mockResponseEntity);
 
-        // Executing the method
-        assertDoesNotThrow(() -> 
-            fileFeedService.saveCSVSchemaToDataset(fileSchema, fileFeedId, feedGroupId, isMultipleSchema)
+        Exception exception = assertThrows(CumulusException.class, () -> 
+            alertingService.createAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId")
         );
 
-        // Verifying interactions
-        verify(datasetMapper, times(1)).addTechnicalColumns(any(Dataset.class), eq(isMultipleSchema));
-        verify(datasetMapper, times(1)).addHeaderColumns(any(Dataset.class));
-        verify(restTemplate, times(1)).exchange(anyString(), eq(HttpMethod.POST), any(), eq(String.class));
+        assertEquals("Unable to create alert configuration", exception.getMessage());
+    }
+
+    @Test
+    void testPrepareFeedAlertResponse() throws Exception {
+        AlertingMetadataResponse mockResponse = new AlertingMetadataResponse();
+        mockResponse.setId("alertId");
+        mockResponse.setIsAlertActive(true);
+        mockResponse.setAlertStartDate("2025-01-01");
+        mockResponse.setAlertEndDate("2025-01-10");
+        mockResponse.setAlertType("CRITICAL");
+        mockResponse.setAlertConfiguration("[{\"key\":\"value\"}]");
+
+        ResponseEntity<AlertingMetadataResponse> responseEntity = mock(ResponseEntity.class);
+        when(responseEntity.getBody()).thenReturn(mockResponse);
+
+        List<FeedAlertScheduleResponse> mockScheduleResponse = new ArrayList<>();
+        FeedAlertScheduleResponse schedule = new FeedAlertScheduleResponse();
+        schedule.setKey("value");
+        mockScheduleResponse.add(schedule);
+
+        when(objectMapper.convertValue(
+                eq("[{\"key\":\"value\"}]"),
+                any(TypeReference.class))
+        ).thenReturn(mockScheduleResponse);
+
+        FeedAlertMetadataResponse result = alertingService.prepareFeedAlertResponse(responseEntity);
+
+        assertNotNull(result);
+        assertTrue(result.getIsAlertActive());
+        assertEquals("CRITICAL", result.getAlertType());
+        assertEquals("alertId", result.getId());
+        assertEquals(1, result.getAlertScheduleResponses().size());
+        assertEquals("value", result.getAlertScheduleResponses().get(0).getKey());
+    }
+
+    @Test
+    void testUpdateAlertConfiguration_Success() throws Exception {
+        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
+        FeedAlertMetadataResponse existingResponse = new FeedAlertMetadataResponse();
+        existingResponse.setId("alertMetadataId");
+
+        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
+        AlertingMetadataResponse mockResponse = new AlertingMetadataResponse();
+        mockResponse.setId("alertMetadataId");
+        when(mockResponseEntity.getStatusCodeValue()).thenReturn(200);
+        when(mockResponseEntity.getBody()).thenReturn(mockResponse);
+        when(restTemplate.exchange(
+                eq("acquisitionAlertingServiceUrl/v1/updateAlertMetadata"),
+                eq(HttpMethod.PUT),
+                any(HttpEntity.class),
+                eq(AlertingMetadataResponse.class)
+        )).thenReturn(mockResponseEntity);
+
+        FeedAlertMetadataResponse result = alertingService.updateAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId");
+
+        assertNotNull(result);
+        assertEquals("alertMetadataId", result.getId());
+    }
+
+    @Test
+    void testUpdateAlertConfiguration_Failure() {
+        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
+        alertMetadata.setId("invalidId");
+
+        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
+        when(mockResponseEntity.getStatusCodeValue()).thenReturn(400);
+        when(restTemplate.exchange(
+                anyString(),
+                eq(HttpMethod.PUT),
+                any(HttpEntity.class),
+                eq(AlertingMetadataResponse.class)
+        )).thenReturn(mockResponseEntity);
+
+        Exception exception = assertThrows(CumulusException.class, () -> 
+            alertingService.updateAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId")
+        );
+
+        assertEquals("Unable to update alert configuration", exception.getMessage());
     }
 }
