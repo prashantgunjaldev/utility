@@ -1,154 +1,119 @@
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
+package com.example.interceptor;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.HttpEntity;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.util.ContentCachingRequestWrapper;
 
-class AlertingServiceTest {
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Enumeration;
 
-    @Mock
-    private ObjectMapper objectMapper;
+@Component
+public class RequestLoggingInterceptor implements HandlerInterceptor {
+    
+    private static final Logger logger = LoggerFactory.getLogger(RequestLoggingInterceptor.class);
 
-    @Mock
-    private RestTemplate restTemplate;
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws IOException {
+        ContentCachingRequestWrapper wrappedRequest = new ContentCachingRequestWrapper(request);
+        
+        String ipAddress = wrappedRequest.getRemoteAddr();
+        String requestURI = wrappedRequest.getRequestURI();
+        String method = wrappedRequest.getMethod();
+        String headers = getHeadersAsString(wrappedRequest);
+        
+        wrappedRequest.getParameterMap(); // Trigger caching
+        String requestBody = getRequestBody(wrappedRequest);
 
-    @Mock
-    private AADSecurityUtil aadSecurityUtil;
+        logger.info("Incoming Request: IP={}, Method={}, URI={}, Headers={}, Body={}", 
+                ipAddress, method, requestURI, headers, requestBody);
 
-    @InjectMocks
-    private AlertingService alertingService;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
+        return true;
     }
 
-    @Test
-    void testCreateAlertConfiguration_Success() throws Exception {
-        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
-        alertMetadata.setFeedId("feedId");
-        alertMetadata.setVendorId("vendorId");
-        alertMetadata.setFeedGroupId("feedGroupId");
-
-        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
-        AlertingMetadataResponse mockResponse = new AlertingMetadataResponse();
-        mockResponse.setId("testId");
-        when(mockResponseEntity.getStatusCodeValue()).thenReturn(201);
-        when(mockResponseEntity.getBody()).thenReturn(mockResponse);
-        when(restTemplate.exchange(
-                eq("acquisitionAlertingServiceUrl/v1/createAlertMetadata"),
-                eq(HttpMethod.POST),
-                any(HttpEntity.class),
-                eq(AlertingMetadataResponse.class)
-        )).thenReturn(mockResponseEntity);
-
-        FeedAlertMetadataResponse result = alertingService.createAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId");
-
-        assertNotNull(result);
-        assertEquals("testId", result.getId());
+    private String getHeadersAsString(HttpServletRequest request) {
+        Enumeration<String> headerNames = request.getHeaderNames();
+        StringBuilder headers = new StringBuilder();
+        while (headerNames.hasMoreElements()) {
+            String headerName = headerNames.nextElement();
+            headers.append(headerName).append(": ").append(request.getHeader(headerName)).append("; ");
+        }
+        return headers.toString();
     }
 
-    @Test
-    void testCreateAlertConfiguration_Failure() {
-        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
+    private String getRequestBody(ContentCachingRequestWrapper request) {
+        byte[] buf = request.getContentAsByteArray();
+        if (buf.length > 0) {
+            return new String(buf, StandardCharsets.UTF_8);
+        }
+        return "N/A";
+    }
+}
 
-        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
-        when(mockResponseEntity.getStatusCodeValue()).thenReturn(400);
-        when(restTemplate.exchange(
-                anyString(),
-                eq(HttpMethod.POST),
-                any(HttpEntity.class),
-                eq(AlertingMetadataResponse.class)
-        )).thenReturn(mockResponseEntity);
+================================================
 
-        Exception exception = assertThrows(CumulusException.class, () -> 
-            alertingService.createAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId")
-        );
+package com.example.config;
 
-        assertEquals("Unable to create alert configuration", exception.getMessage());
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import com.example.interceptor.RequestLoggingInterceptor;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+    private final RequestLoggingInterceptor requestLoggingInterceptor;
+
+    public WebConfig(RequestLoggingInterceptor requestLoggingInterceptor) {
+        this.requestLoggingInterceptor = requestLoggingInterceptor;
     }
 
-    @Test
-    void testPrepareFeedAlertResponse() throws Exception {
-        AlertingMetadataResponse mockResponse = new AlertingMetadataResponse();
-        mockResponse.setId("alertId");
-        mockResponse.setIsAlertActive(true);
-        mockResponse.setAlertStartDate("2025-01-01");
-        mockResponse.setAlertEndDate("2025-01-10");
-        mockResponse.setAlertType("CRITICAL");
-        mockResponse.setAlertConfiguration("[{\"key\":\"value\"}]");
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(requestLoggingInterceptor);
+    }
+}
 
-        ResponseEntity<AlertingMetadataResponse> responseEntity = mock(ResponseEntity.class);
-        when(responseEntity.getBody()).thenReturn(mockResponse);
+=================== Filter ==============================
+package com.example.filter;
 
-        List<FeedAlertScheduleResponse> mockScheduleResponse = new ArrayList<>();
-        FeedAlertScheduleResponse schedule = new FeedAlertScheduleResponse();
-        schedule.setKey("value");
-        mockScheduleResponse.add(schedule);
+import javax.servlet.Filter;
+import javax.servlet.FilterChain;
+import javax.servlet.FilterConfig;
+import javax.servlet.ServletException;
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import javax.servlet.http.HttpServletRequest;
+import org.springframework.stereotype.Component;
+import org.springframework.web.util.ContentCachingRequestWrapper;
 
-        when(objectMapper.convertValue(
-                eq("[{\"key\":\"value\"}]"),
-                any(TypeReference.class))
-        ).thenReturn(mockScheduleResponse);
+import java.io.IOException;
 
-        FeedAlertMetadataResponse result = alertingService.prepareFeedAlertResponse(responseEntity);
-
-        assertNotNull(result);
-        assertTrue(result.getIsAlertActive());
-        assertEquals("CRITICAL", result.getAlertType());
-        assertEquals("alertId", result.getId());
-        assertEquals(1, result.getAlertScheduleResponses().size());
-        assertEquals("value", result.getAlertScheduleResponses().get(0).getKey());
+@Component
+public class RequestCachingFilter implements Filter {
+    
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        if (request instanceof HttpServletRequest) {
+            HttpServletRequest wrappedRequest = new ContentCachingRequestWrapper((HttpServletRequest) request);
+            chain.doFilter(wrappedRequest, response);
+        } else {
+            chain.doFilter(request, response);
+        }
     }
 
-    @Test
-    void testUpdateAlertConfiguration_Success() throws Exception {
-        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
-        FeedAlertMetadataResponse existingResponse = new FeedAlertMetadataResponse();
-        existingResponse.setId("alertMetadataId");
-
-        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
-        AlertingMetadataResponse mockResponse = new AlertingMetadataResponse();
-        mockResponse.setId("alertMetadataId");
-        when(mockResponseEntity.getStatusCodeValue()).thenReturn(200);
-        when(mockResponseEntity.getBody()).thenReturn(mockResponse);
-        when(restTemplate.exchange(
-                eq("acquisitionAlertingServiceUrl/v1/updateAlertMetadata"),
-                eq(HttpMethod.PUT),
-                any(HttpEntity.class),
-                eq(AlertingMetadataResponse.class)
-        )).thenReturn(mockResponseEntity);
-
-        FeedAlertMetadataResponse result = alertingService.updateAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId");
-
-        assertNotNull(result);
-        assertEquals("alertMetadataId", result.getId());
+    @Override
+    public void init(FilterConfig filterConfig) throws ServletException {
+        // No initialization required
     }
 
-    @Test
-    void testUpdateAlertConfiguration_Failure() {
-        AlertingMetadataRequest alertMetadata = new AlertingMetadataRequest();
-        alertMetadata.setId("invalidId");
-
-        ResponseEntity<AlertingMetadataResponse> mockResponseEntity = mock(ResponseEntity.class);
-        when(mockResponseEntity.getStatusCodeValue()).thenReturn(400);
-        when(restTemplate.exchange(
-                anyString(),
-                eq(HttpMethod.PUT),
-                any(HttpEntity.class),
-                eq(AlertingMetadataResponse.class)
-        )).thenReturn(mockResponseEntity);
-
-        Exception exception = assertThrows(CumulusException.class, () -> 
-            alertingService.updateAlertConfiguration(alertMetadata, "fileId", "feedGroupId", "vendorId")
-        );
-
-        assertEquals("Unable to update alert configuration", exception.getMessage());
+    @Override
+    public void destroy() {
+        // No cleanup required
     }
 }
