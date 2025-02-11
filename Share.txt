@@ -4,21 +4,19 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingRequestWrapper;
-import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Component
-@Order(-102) // Ensures this runs before Spring Security
+@Order(-104) // Run before Spring Security filters
 public class LoggingFilter extends OncePerRequestFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(LoggingFilter.class);
@@ -28,45 +26,34 @@ public class LoggingFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         
         // Wrap the request to allow multiple reads
-        if (!(request instanceof ContentCachingRequestWrapper)) {
-            request = new ContentCachingRequestWrapper(request);
-        }
-        if (!(response instanceof ContentCachingResponseWrapper)) {
-            response = new ContentCachingResponseWrapper(response);
-        }
+        ContentCachingRequestWrapper wrappedRequest = new ContentCachingRequestWrapper(request);
 
-        long startTime = System.currentTimeMillis();
-        filterChain.doFilter(request, response);
-        long duration = System.currentTimeMillis() - startTime;
+        // Force the request body to be read and cached
+        wrappedRequest.getParameterMap(); // Ensures parameters are cached
+        forceReadRequestBody(wrappedRequest);
 
-        logRequestResponse((ContentCachingRequestWrapper) request, (ContentCachingResponseWrapper) response, duration);
+        logRequest(wrappedRequest);
 
-        // Ensure response body is sent to the client
-        ((ContentCachingResponseWrapper) response).copyBodyToResponse();
+        // Proceed with the filter chain
+        filterChain.doFilter(wrappedRequest, response);
     }
 
-    private void logRequestResponse(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response, long duration) {
+    private void logRequest(ContentCachingRequestWrapper request) {
         String ipAddress = request.getRemoteAddr();
         String method = request.getMethod();
         String requestURI = request.getRequestURI();
         String requestBody = getRequestBody(request);
-        int status = response.getStatus();
-        String responseBody = getResponseBody(response);
 
         logger.info("Request: IP={}, Method={}, URI={}, Body={}", ipAddress, method, requestURI, requestBody);
-        logger.info("Response: Status={}, Body={}, Duration={}ms", status, responseBody, duration);
+    }
+
+    private void forceReadRequestBody(ContentCachingRequestWrapper request) throws IOException {
+        // Force reading request body to make it available for logging
+        request.getInputStream().readAllBytes();
     }
 
     private String getRequestBody(ContentCachingRequestWrapper request) {
         byte[] buf = request.getContentAsByteArray();
-        if (buf.length > 0) {
-            return new String(buf, StandardCharsets.UTF_8);
-        }
-        return "N/A";
-    }
-
-    private String getResponseBody(ContentCachingResponseWrapper response) {
-        byte[] buf = response.getContentAsByteArray();
         if (buf.length > 0) {
             return new String(buf, StandardCharsets.UTF_8);
         }
