@@ -1,35 +1,30 @@
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.util.ContentCachingRequestWrapper;
-import org.springframework.web.util.ContentCachingResponseWrapper;
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
 
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
+    private final RequestResponseLoggingInterceptor loggingInterceptor;
 
-@Component
-@Order(Ordered.HIGHEST_PRECEDENCE) // Run before Spring Security filters
-public class RequestCachingFilter extends OncePerRequestFilter {
+    public SecurityConfig(RequestResponseLoggingInterceptor loggingInterceptor) {
+        this.loggingInterceptor = loggingInterceptor;
+    }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
-        
-        if (!(request instanceof ContentCachingRequestWrapper)) {
-            request = new ContentCachingRequestWrapper(request);
-        }
-        if (!(response instanceof ContentCachingResponseWrapper)) {
-            response = new ContentCachingResponseWrapper(response);
-        }
+    protected void configure(HttpSecurity http) throws Exception {
+        http
+            .authorizeRequests()
+            .antMatchers("/api/**").authenticated()
+            .anyRequest().permitAll()
+            .and()
+            .oauth2ResourceServer().jwt(); // Use AAD authentication
 
-        filterChain.doFilter(request, response);
+        http.cors().and().csrf().disable();
+    }
 
-        ((ContentCachingResponseWrapper) response).copyBodyToResponse(); // Ensure response body is preserved
+    @Bean
+    public FilterRegistrationBean<RequestResponseLoggingInterceptor> loggingFilter() {
+        FilterRegistrationBean<RequestResponseLoggingInterceptor> registrationBean = new FilterRegistrationBean<>();
+        registrationBean.setFilter(loggingInterceptor);
+        registrationBean.setOrder(Ordered.HIGHEST_PRECEDENCE); // Run before Spring Security filters
+        return registrationBean;
     }
 }
