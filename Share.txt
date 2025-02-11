@@ -1,30 +1,75 @@
-@Configuration
-@EnableWebSecurity
-public class SecurityConfig extends WebSecurityConfigurerAdapter {
+package com.example.filter;
 
-    private final RequestResponseLoggingInterceptor loggingInterceptor;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.ContentCachingRequestWrapper;
+import org.springframework.web.util.ContentCachingResponseWrapper;
 
-    public SecurityConfig(RequestResponseLoggingInterceptor loggingInterceptor) {
-        this.loggingInterceptor = loggingInterceptor;
-    }
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@Component
+@Order(-102) // Ensures this runs before Spring Security
+public class LoggingFilter extends OncePerRequestFilter {
+
+    private static final Logger logger = LoggerFactory.getLogger(LoggingFilter.class);
 
     @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        http
-            .authorizeRequests()
-            .antMatchers("/api/**").authenticated()
-            .anyRequest().permitAll()
-            .and()
-            .oauth2ResourceServer().jwt(); // Use AAD authentication
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        
+        // Wrap the request to allow multiple reads
+        if (!(request instanceof ContentCachingRequestWrapper)) {
+            request = new ContentCachingRequestWrapper(request);
+        }
+        if (!(response instanceof ContentCachingResponseWrapper)) {
+            response = new ContentCachingResponseWrapper(response);
+        }
 
-        http.cors().and().csrf().disable();
+        long startTime = System.currentTimeMillis();
+        filterChain.doFilter(request, response);
+        long duration = System.currentTimeMillis() - startTime;
+
+        logRequestResponse((ContentCachingRequestWrapper) request, (ContentCachingResponseWrapper) response, duration);
+
+        // Ensure response body is sent to the client
+        ((ContentCachingResponseWrapper) response).copyBodyToResponse();
     }
 
-    @Bean
-    public FilterRegistrationBean<RequestResponseLoggingInterceptor> loggingFilter() {
-        FilterRegistrationBean<RequestResponseLoggingInterceptor> registrationBean = new FilterRegistrationBean<>();
-        registrationBean.setFilter(loggingInterceptor);
-        registrationBean.setOrder(Ordered.HIGHEST_PRECEDENCE); // Run before Spring Security filters
-        return registrationBean;
+    private void logRequestResponse(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response, long duration) {
+        String ipAddress = request.getRemoteAddr();
+        String method = request.getMethod();
+        String requestURI = request.getRequestURI();
+        String requestBody = getRequestBody(request);
+        int status = response.getStatus();
+        String responseBody = getResponseBody(response);
+
+        logger.info("Request: IP={}, Method={}, URI={}, Body={}", ipAddress, method, requestURI, requestBody);
+        logger.info("Response: Status={}, Body={}, Duration={}ms", status, responseBody, duration);
+    }
+
+    private String getRequestBody(ContentCachingRequestWrapper request) {
+        byte[] buf = request.getContentAsByteArray();
+        if (buf.length > 0) {
+            return new String(buf, StandardCharsets.UTF_8);
+        }
+        return "N/A";
+    }
+
+    private String getResponseBody(ContentCachingResponseWrapper response) {
+        byte[] buf = response.getContentAsByteArray();
+        if (buf.length > 0) {
+            return new String(buf, StandardCharsets.UTF_8);
+        }
+        return "N/A";
     }
 }
