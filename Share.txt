@@ -1,114 +1,74 @@
 import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
 
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.springframework.mock.web.ContentCachingRequestWrapper;
 import org.springframework.mock.web.ContentCachingResponseWrapper;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 
-import org.junit.jupiter.api.extension.ExtendWith;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.Enumeration;
-
-@ExtendWith(SpringExtension.class)
-@SpringBootTest
 class RequestResponseLoggingFilterTest {
 
-    @MockBean
+    @Mock
     private ApiLogService apiLogService;
 
-    @MockBean
+    @Mock
     private FilterChain filterChain;
 
-    @MockBean
-    private HttpServletRequest request;
-
-    @MockBean
-    private HttpServletResponse response;
-
+    @InjectMocks
     private RequestResponseLoggingFilter filter;
-    private ContentCachingRequestWrapper requestWrapper;
-    private ContentCachingResponseWrapper responseWrapper;
 
     @BeforeEach
     void setUp() {
-        filter = new RequestResponseLoggingFilter(apiLogService);
-        requestWrapper = new ContentCachingRequestWrapper(request);
-        responseWrapper = new ContentCachingResponseWrapper(response);
+        MockitoAnnotations.openMocks(this);
     }
 
     @Test
-    void testDoFilterInternal() throws ServletException, IOException {
-        when(request.getMethod()).thenReturn("GET");
-        when(request.getRequestURI()).thenReturn("/test");
-        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
-        when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.emptyList()));
+    void testFilterLogsRequestAndResponse() throws ServletException, IOException {
+        // Create mock request & response
+        MockHttpServletRequest mockRequest = new MockHttpServletRequest("POST", "/test-endpoint");
+        mockRequest.setContent("test-body".getBytes(StandardCharsets.UTF_8));
+        mockRequest.addHeader("Authorization", "Bearer token");
 
-        filter.doFilterInternal(request, response, filterChain);
+        MockHttpServletResponse mockResponse = new MockHttpServletResponse();
+        mockResponse.setStatus(200);
+        mockResponse.getOutputStream().write("response-body".getBytes(StandardCharsets.UTF_8));
 
-        verify(filterChain).doFilter(any(), any());
-        verify(apiLogService, atLeastOnce()).log(any());
-    }
+        // Wrap in ContentCaching wrappers
+        ContentCachingRequestWrapper requestWrapper = new ContentCachingRequestWrapper(mockRequest);
+        ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(mockResponse);
 
-    @Test
-    void testLogRequest() {
-        Enumeration<String> headerNames = Collections.enumeration(Collections.singletonList("Content-Type"));
-        when(request.getHeaderNames()).thenReturn(headerNames);
-        when(request.getHeader("Content-Type")).thenReturn("application/json");
+        // Manually invoke the filter
+        filter.doFilterInternal(requestWrapper, responseWrapper, filterChain);
 
-        byte[] body = "{\"key\":\"value\"}".getBytes(StandardCharsets.UTF_8);
-        requestWrapper.getContentAsByteArray();
+        // Capture the log object passed to ApiLogService
+        ArgumentCaptor<ApiLog> logCaptor = ArgumentCaptor.forClass(ApiLog.class);
+        verify(apiLogService, atLeastOnce()).log(logCaptor.capture());
 
-        filter.logRequest(requestWrapper, "test-uuid");
+        ApiLog loggedRequest = logCaptor.getAllValues().get(0);
+        ApiLog loggedResponse = logCaptor.getAllValues().get(1);
 
-        verify(apiLogService).log(any());
-    }
+        // Validate request log
+        assertEquals("/test-endpoint", loggedRequest.getRequestURI());
+        assertEquals("test-body", loggedRequest.getPayload());
+        assertEquals("REQUEST", loggedRequest.getType());
 
-    @Test
-    void testLogResponse() {
-        when(response.getStatus()).thenReturn(200);
-        byte[] responseBody = "{\"message\":\"success\"}".getBytes(StandardCharsets.UTF_8);
-        responseWrapper.getContentAsByteArray();
-        
-        filter.logResponse(requestWrapper, responseWrapper, 500L, "test-uuid");
-
-        verify(apiLogService).log(any());
-    }
-
-    @Test
-    void testGetRequestHeaders() {
-        when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.singletonList("Authorization")));
-        when(request.getHeader("Authorization")).thenReturn("Bearer token");
-
-        String headers = filter.getRequestHeaders(requestWrapper);
-        assertTrue(headers.contains("Authorization"));
-    }
-
-    @Test
-    void testGetRequestBody() {
-        byte[] body = "sample request".getBytes(StandardCharsets.UTF_8);
-        requestWrapper.getContentAsByteArray();
-        
-        String requestBody = filter.getRequestBody(requestWrapper);
-        assertNotNull(requestBody);
-    }
-
-    @Test
-    void testGetResponseBody() {
-        byte[] body = "sample response".getBytes(StandardCharsets.UTF_8);
-        responseWrapper.getContentAsByteArray();
-        
-        String responseBody = filter.getResponseBody(responseWrapper);
-        assertNotNull(responseBody);
+        // Validate response log
+        assertEquals(200, loggedResponse.getStatus());
+        assertEquals("response-body", loggedResponse.getPayload());
+        assertEquals("RESPONSE", loggedResponse.getType());
     }
 }
