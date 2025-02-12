@@ -1,102 +1,87 @@
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.mock.web.ContentCachingRequestWrapper;
 import org.springframework.mock.web.ContentCachingResponseWrapper;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
 
+import org.junit.jupiter.api.extension.ExtendWith;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Enumeration;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith(SpringExtension.class)
+@SpringBootTest
 class RequestResponseLoggingFilterTest {
 
-    @Mock
+    @MockBean
     private ApiLogService apiLogService;
 
-    @Mock
+    @MockBean
     private FilterChain filterChain;
 
-    @Mock
+    @MockBean
     private HttpServletRequest request;
 
-    @Mock
+    @MockBean
     private HttpServletResponse response;
 
-    @InjectMocks
     private RequestResponseLoggingFilter filter;
-
     private ContentCachingRequestWrapper requestWrapper;
     private ContentCachingResponseWrapper responseWrapper;
 
     @BeforeEach
     void setUp() {
+        filter = new RequestResponseLoggingFilter(apiLogService);
         requestWrapper = new ContentCachingRequestWrapper(request);
         responseWrapper = new ContentCachingResponseWrapper(response);
     }
 
     @Test
     void testDoFilterInternal() throws ServletException, IOException {
-        // Mock request behavior
-        when(request.getParameterMap()).thenReturn(Collections.emptyMap());
         when(request.getMethod()).thenReturn("GET");
         when(request.getRequestURI()).thenReturn("/test");
         when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.emptyList()));
 
-        // Execute filter
         filter.doFilterInternal(request, response, filterChain);
 
-        // Verify that filterChain.doFilter() is called
         verify(filterChain).doFilter(any(), any());
-        
-        // Verify logging service interactions
         verify(apiLogService, atLeastOnce()).log(any());
     }
 
     @Test
     void testLogRequest() {
-        // Mock request headers
         Enumeration<String> headerNames = Collections.enumeration(Collections.singletonList("Content-Type"));
         when(request.getHeaderNames()).thenReturn(headerNames);
         when(request.getHeader("Content-Type")).thenReturn("application/json");
 
-        // Mock body
         byte[] body = "{\"key\":\"value\"}".getBytes(StandardCharsets.UTF_8);
         requestWrapper.getContentAsByteArray();
-        requestWrapper.getInputStream(); // Ensures content is cached
 
-        // Invoke method
         filter.logRequest(requestWrapper, "test-uuid");
 
-        // Verify that the log service is called
         verify(apiLogService).log(any());
     }
 
     @Test
     void testLogResponse() {
-        // Mock response behavior
         when(response.getStatus()).thenReturn(200);
-
-        // Mock response body
         byte[] responseBody = "{\"message\":\"success\"}".getBytes(StandardCharsets.UTF_8);
         responseWrapper.getContentAsByteArray();
         
-        // Invoke method
         filter.logResponse(requestWrapper, responseWrapper, 500L, "test-uuid");
 
-        // Verify that the log service is called
         verify(apiLogService).log(any());
     }
 
