@@ -1,62 +1,129 @@
-package com.example.filter;
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.util.ContentCachingRequestWrapper;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.ContentCachingRequestWrapper;
+import org.springframework.mock.web.ContentCachingResponseWrapper;
 
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Enumeration;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+@ExtendWith(MockitoExtension.class)
+class RequestResponseLoggingFilterTest {
 
-@Component
-@Order(-104) // Run before Spring Security filters
-public class LoggingFilter extends OncePerRequestFilter {
+    @Mock
+    private ApiLogService apiLogService;
 
-    private static final Logger logger = LoggerFactory.getLogger(LoggingFilter.class);
+    @Mock
+    private FilterChain filterChain;
 
-    @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
+    @Mock
+    private HttpServletRequest request;
+
+    @Mock
+    private HttpServletResponse response;
+
+    @InjectMocks
+    private RequestResponseLoggingFilter filter;
+
+    private ContentCachingRequestWrapper requestWrapper;
+    private ContentCachingResponseWrapper responseWrapper;
+
+    @BeforeEach
+    void setUp() {
+        requestWrapper = new ContentCachingRequestWrapper(request);
+        responseWrapper = new ContentCachingResponseWrapper(response);
+    }
+
+    @Test
+    void testDoFilterInternal() throws ServletException, IOException {
+        // Mock request behavior
+        when(request.getParameterMap()).thenReturn(Collections.emptyMap());
+        when(request.getMethod()).thenReturn("GET");
+        when(request.getRequestURI()).thenReturn("/test");
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.emptyList()));
+
+        // Execute filter
+        filter.doFilterInternal(request, response, filterChain);
+
+        // Verify that filterChain.doFilter() is called
+        verify(filterChain).doFilter(any(), any());
         
-        // Wrap the request to allow multiple reads
-        ContentCachingRequestWrapper wrappedRequest = new ContentCachingRequestWrapper(request);
-
-        // Force the request body to be read and cached
-        wrappedRequest.getParameterMap(); // Ensures parameters are cached
-        forceReadRequestBody(wrappedRequest);
-
-        logRequest(wrappedRequest);
-
-        // Proceed with the filter chain
-        filterChain.doFilter(wrappedRequest, response);
+        // Verify logging service interactions
+        verify(apiLogService, atLeastOnce()).log(any());
     }
 
-    private void logRequest(ContentCachingRequestWrapper request) {
-        String ipAddress = request.getRemoteAddr();
-        String method = request.getMethod();
-        String requestURI = request.getRequestURI();
-        String requestBody = getRequestBody(request);
+    @Test
+    void testLogRequest() {
+        // Mock request headers
+        Enumeration<String> headerNames = Collections.enumeration(Collections.singletonList("Content-Type"));
+        when(request.getHeaderNames()).thenReturn(headerNames);
+        when(request.getHeader("Content-Type")).thenReturn("application/json");
 
-        logger.info("Request: IP={}, Method={}, URI={}, Body={}", ipAddress, method, requestURI, requestBody);
+        // Mock body
+        byte[] body = "{\"key\":\"value\"}".getBytes(StandardCharsets.UTF_8);
+        requestWrapper.getContentAsByteArray();
+        requestWrapper.getInputStream(); // Ensures content is cached
+
+        // Invoke method
+        filter.logRequest(requestWrapper, "test-uuid");
+
+        // Verify that the log service is called
+        verify(apiLogService).log(any());
     }
 
-    private void forceReadRequestBody(ContentCachingRequestWrapper request) throws IOException {
-        // Force reading request body to make it available for logging
-        request.getInputStream().readAllBytes();
+    @Test
+    void testLogResponse() {
+        // Mock response behavior
+        when(response.getStatus()).thenReturn(200);
+
+        // Mock response body
+        byte[] responseBody = "{\"message\":\"success\"}".getBytes(StandardCharsets.UTF_8);
+        responseWrapper.getContentAsByteArray();
+        
+        // Invoke method
+        filter.logResponse(requestWrapper, responseWrapper, 500L, "test-uuid");
+
+        // Verify that the log service is called
+        verify(apiLogService).log(any());
     }
 
-    private String getRequestBody(ContentCachingRequestWrapper request) {
-        byte[] buf = request.getContentAsByteArray();
-        if (buf.length > 0) {
-            return new String(buf, StandardCharsets.UTF_8);
-        }
-        return "N/A";
+    @Test
+    void testGetRequestHeaders() {
+        when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.singletonList("Authorization")));
+        when(request.getHeader("Authorization")).thenReturn("Bearer token");
+
+        String headers = filter.getRequestHeaders(requestWrapper);
+        assertTrue(headers.contains("Authorization"));
+    }
+
+    @Test
+    void testGetRequestBody() {
+        byte[] body = "sample request".getBytes(StandardCharsets.UTF_8);
+        requestWrapper.getContentAsByteArray();
+        
+        String requestBody = filter.getRequestBody(requestWrapper);
+        assertNotNull(requestBody);
+    }
+
+    @Test
+    void testGetResponseBody() {
+        byte[] body = "sample response".getBytes(StandardCharsets.UTF_8);
+        responseWrapper.getContentAsByteArray();
+        
+        String responseBody = filter.getResponseBody(responseWrapper);
+        assertNotNull(responseBody);
     }
 }
