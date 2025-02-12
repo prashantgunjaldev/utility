@@ -1,60 +1,53 @@
+package com.example.service;
+
+import com.example.repository.ApiLogJpaRepo;
+import com.example.model.ApiLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.mock.web.MockFilterChain;
-import org.springframework.mock.web.MockHttpServletRequest;
-import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.web.util.ContentCachingRequestWrapper;
-import org.springframework.web.util.ContentCachingResponseWrapper;
-
-import java.io.IOException;
-import java.util.UUID;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.mockito.Mockito.*;
 
-class RequestResponseLoggingFilterTest {
+@ExtendWith(MockitoExtension.class)
+class ApiLogServiceImplTest {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiLogServiceImplTest.class);
 
     @Mock
-    private ApiLogService apiLogService;
+    private ApiLogJpaRepo apiLogJpaRepo;
 
-    private RequestResponseLoggingFilter filter;
+    @InjectMocks
+    private ApiLogServiceImpl apiLogService;
+
+    private ApiLog apiLog;
 
     @BeforeEach
     void setUp() {
-        MockitoAnnotations.openMocks(this);
-        filter = new RequestResponseLoggingFilter(apiLogService);
+        apiLog = new ApiLog(); // Set fields if necessary
     }
 
     @Test
-    void testDoFilterInternal() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        MockFilterChain filterChain = new MockFilterChain();
+    void testLogSuccess() {
+        doNothing().when(apiLogJpaRepo).save(apiLog);
 
-        request.setMethod("GET");
-        request.setRequestURI("/test");
-        request.addHeader("X-Test-Header", "HeaderValue");
-        request.setContent("Test Body".getBytes());
+        apiLogService.log(apiLog);
 
-        filter.doFilterInternal(request, response, filterChain);
-
-        verify(apiLogService, atLeastOnce()).log(any());
+        verify(apiLogJpaRepo, times(1)).save(apiLog);
+        log.info("Test: API log persisted successfully");
     }
 
     @Test
-    void testLogRequest() throws IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        request.setMethod("POST");
-        request.setRequestURI("/test");
-        request.addHeader("Content-Type", "application/json");
-        request.setContent("{\"key\":\"value\"}".getBytes());
+    void testLogFailure() {
+        doThrow(new RuntimeException("DB error")).when(apiLogJpaRepo).save(apiLog);
 
-        ContentCachingRequestWrapper wrappedRequest = new ContentCachingRequestWrapper(request);
-        String uniqueId = UUID.randomUUID().toString();
+        apiLogService.log(apiLog);
 
-        filter.logRequest(wrappedRequest, uniqueId);
-
-        verify(apiLogService, times(1)).log(any());
+        verify(apiLogJpaRepo, times(1)).save(apiLog);
+        log.error("Test: Failed to persist API log due to DB error");
     }
 }
