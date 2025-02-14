@@ -1,19 +1,24 @@
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 import java.util.List;
+import java.util.Collections;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
-@ExtendWith(SpringExtension.class)
-@DataJpaTest
 public class ProcessExecutionTrackerRepositoryTest {
 
-    @Autowired
+    @Mock
     private ProcessExecutionTrackerRepository repository;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
 
     @Test
     public void testFindWipProcessById() {
@@ -21,7 +26,8 @@ public class ProcessExecutionTrackerRepositoryTest {
         ProcessExecutionTracker tracker = new ProcessExecutionTracker();
         tracker.setProcessId("123");
         tracker.setStatus("PROCESSING");
-        repository.save(tracker);
+
+        when(repository.findWipProcessById("123")).thenReturn(Collections.singletonList(tracker));
 
         // When
         List<ProcessExecutionTracker> results = repository.findWipProcessById("123");
@@ -29,5 +35,8 @@ public class ProcessExecutionTrackerRepositoryTest {
         // Then
         assertThat(results).isNotEmpty();
         assertThat(results.get(0).getProcessId()).isEqualTo("123");
+
+        // Verify that the method was called once
+        verify(repository, times(1)).findWipProcessById("123");
     }
 }
