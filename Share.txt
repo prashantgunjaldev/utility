@@ -1,159 +1,98 @@
-public SixFeedFilesDeltaResponse getSixFileDelta(SixFeedFilesDeltaRequest feedFilesDeltaRequests) {
-    deleteFileDeltas(feedFilesDeltaRequests.getFeedId());
+import com.ubs.cumulus.acq.utility.api.v1.sixflex.delta.repository.ProcessExecutionTrackerRepository;
+import com.ubs.cumulus.acq.utility.api.v1.sixflex.delta.service.ProcessExecutionTrackerService;
+import com.ubs.cumulus.acq.utility.api.v1.sixflex.delta.model.ProcessExecutionTracker;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import scala.Option;
+import scala.collection.JavaConverters;
+import scala.collection.mutable.Buffer;
 
-    List<SixFeedFilesDeltaResponse> responseList = new ArrayList<>();
-    Map<String, List<String>> fileMap = new HashMap<>();
-    
-    List<SixFeedFilesDelta> feedFilesDeltaFromDB = fileDeltaRepository.findNonProcessedDelta(feedFilesDeltaRequests.getFeedId());
+import java.util.Collections;
+import java.util.List;
 
-    // Process new files
-    processNewFiles(feedFilesDeltaRequests, feedFilesDeltaFromDB, fileMap, responseList);
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
-    // Group files by BC
-    sortFilesByBC(fileMap);
-    List<SixFeedFilesDeltaDTO> sixFeedFilesDeltaDTOList = createFeedGroup(fileMap);
+@ExtendWith(MockitoExtension.class)
+class ProcessExecutionTrackerServiceTest {
 
-    SixFeedFilesDeltaResponse feedResponse = new SixFeedFilesDeltaResponse();
-    feedResponse.setFeedGroup(sixFeedFilesDeltaDTOList);
+    @Mock
+    private ProcessExecutionTrackerRepository repository;
 
-    return feedResponse;
-}
+    @InjectMocks
+    private ProcessExecutionTrackerService service;
 
-private void processNewFiles(
-        SixFeedFilesDeltaRequest request, 
-        List<SixFeedFilesDelta> existingDeltas, 
-        Map<String, List<String>> fileMap, 
-        List<SixFeedFilesDeltaResponse> responseList) {
+    private ProcessExecutionTracker tracker;
 
-    if (existingDeltas.isEmpty()) {
-        request.getFileNames().stream()
-            .filter(file -> file.getParentName() != null && file.getParentName().contains("_data_"))
-            .forEach(file -> processAndSaveDelta(request, file, fileMap, responseList));
-    } else {
-        processExistingFiles(request, existingDeltas, fileMap, responseList);
+    @BeforeEach
+    void setUp() {
+        tracker = new ProcessExecutionTracker();
+        tracker.setId("123");
+        tracker.setStatus("WIP");
     }
-}
 
-private void processAndSaveDelta(
-        SixFeedFilesDeltaRequest request, 
-        File file, 
-        Map<String, List<String>> fileMap, 
-        List<SixFeedFilesDeltaResponse> responseList) {
+    @Test
+    void testSave() {
+        when(repository.save(any())).thenReturn(tracker);
 
-    try {
-        SixFeedFilesDelta delta = createDeltaEntity(request, file);
-        fileDeltaRepository.save(delta);
+        ProcessExecutionTracker savedTracker = service.save(tracker);
 
-        SixFeedFilesDeltaResponse feedResponse = new SixFeedFilesDeltaResponse();
-        feedResponse.setFeedId(request.getFeedId());
-        feedResponse.setProcessId(request.getProcessId());
-        feedResponse.setProcessDate(request.getProcessDate());
-
-        String parentName = file.getParentName();
-        String bc = stripBC(parentName);
-        addToFileMap(fileMap, bc, parentName);
-        responseList.add(feedResponse);
-    } catch (Exception e) {
-        log.error("Exception while inserting: " + e);
+        assertNotNull(savedTracker);
+        assertEquals("123", savedTracker.getId());
+        verify(repository, times(1)).save(tracker);
     }
-}
 
-private SixFeedFilesDelta createDeltaEntity(SixFeedFilesDeltaRequest request, File file) {
-    SixFeedFilesDelta delta = new SixFeedFilesDelta();
-    delta.generateUniqueId();
-    delta.setFeedId(request.getFeedId());
-    delta.setProcessId(request.getProcessId());
-    delta.setProcessDate(getSQLDate(request.getProcessDate()));
-    delta.setFilename(file.getParentName());
-    delta.setChildFilename(file.getName());
-    delta.setType(Constants.FILE);
-    delta.setStatus(Constants.IGNORED);
-    delta.setCreatedOn(DateUtil.currentDateTimeInUTC());
-    return delta;
-}
+    @Test
+    void testMarkProcessed() {
+        service.markProcessed(tracker);
 
-private void addToFileMap(Map<String, List<String>> fileMap, String bc, String parentName) {
-    fileMap.computeIfAbsent(bc, k -> new ArrayList<>()).add(parentName);
-}
-
-private void processExistingFiles(
-        SixFeedFilesDeltaRequest request, 
-        List<SixFeedFilesDelta> existingDeltas, 
-        Map<String, List<String>> fileMap, 
-        List<SixFeedFilesDeltaResponse> responseList) {
-
-    Set<String> blockedFailedBC = blockFailedAndAcceptedBC(request.getFeedId());
-
-    Set<SixFeedFilesDTO> setFromDB = new HashSet<>();
-    Set<SixFeedFilesDTO> setFromRequest = new HashSet<>();
-
-    // Convert DB records to DTOs
-    existingDeltas.stream()
-        .map(feed -> new SixFeedFilesDTO(feed.getFeedId(), feed.getFilename(), feed.getType()))
-        .forEach(setFromDB::add);
-
-    // Convert request files to DTOs
-    request.getFileNames().stream()
-        .map(file -> new SixFeedFilesDTO(request.getFeedId(), request.getProcessId(), file.getParentName(), file.getType()))
-        .forEach(setFromRequest::add);
-
-    // Remove processed files and persist new ones
-    setFromRequest.removeAll(setFromDB);
-
-    if (setFromRequest.isEmpty()) return;
-
-    setFromRequest.stream()
-        .filter(feed -> feed.getName() != null && feed.getName().contains("_data_"))
-        .forEach(feed -> processNewFile(feed, request, blockedFailedBC, fileMap, responseList));
-}
-
-private void processNewFile(
-        SixFeedFilesDTO feed, 
-        SixFeedFilesDeltaRequest request, 
-        Set<String> blockedFailedBC, 
-        Map<String, List<String>> fileMap, 
-        List<SixFeedFilesDeltaResponse> responseList) {
-
-    String parentName = feed.getName();
-    String bc = stripBC(parentName);
-
-    if (!blockedFailedBC.contains(bc)) {
-        try {
-            SixFeedFilesDelta delta = new SixFeedFilesDelta();
-            delta.generateUniqueId();
-            delta.setFeedId(feed.getFeedId());
-            delta.setProcessId(feed.getProcessId());
-            delta.setProcessDate(getSQLDate(request.getProcessDate()));
-            delta.setFilename(feed.getName());
-            delta.setChildFilename(feed.getName());
-            delta.setType(feed.getType());
-            delta.setStatus("NEW");
-            delta.setCreatedOn(DateUtil.currentDateTimeInUTC());
-
-            fileDeltaRepository.save(delta);
-
-            SixFeedFilesDeltaResponse feedResponse = new SixFeedFilesDeltaResponse();
-            feedResponse.setFeedId(request.getFeedId());
-            feedResponse.setProcessId(request.getProcessId());
-            feedResponse.setProcessDate(request.getProcessDate());
-
-            addToFileMap(fileMap, bc, parentName);
-            responseList.add(feedResponse);
-        } catch (Exception e) {
-            log.error("Exception while inserting: " + e);
-        }
-    } else {
-        fileMap.remove(bc);
+        assertEquals("PROCESSED", tracker.getStatus());
+        verify(repository, times(1)).save(tracker);
     }
-}
 
-private List<SixFeedFilesDeltaDTO> createFeedGroup(Map<String, List<String>> fileMap) {
-    return fileMap.entrySet().stream()
-        .map(entry -> {
-            SixFeedFilesDeltaDTO dto = new SixFeedFilesDeltaDTO();
-            dto.setBCName(entry.getKey());
-            dto.setFileNames(entry.getValue());
-            return dto;
-        })
-        .collect(Collectors.toList());
+    @Test
+    void testFindWipProcessById_Found() {
+        List<ProcessExecutionTracker> activeProcesses = Collections.singletonList(tracker);
+        when(repository.findWipProcessById("123")).thenReturn(activeProcesses);
+
+        ProcessExecutionTracker result = service.findWipProcessById("123");
+
+        assertNotNull(result);
+        assertEquals("123", result.getId());
+    }
+
+    @Test
+    void testFindWipProcessById_NotFound() {
+        when(repository.findWipProcessById("123")).thenReturn(Collections.emptyList());
+
+        ProcessExecutionTracker result = service.findWipProcessById("123");
+
+        assertNull(result);
+    }
+
+    @Test
+    void testWaitToFinishOngoingJob_Processed() {
+        when(repository.findWipProcessById("123")).thenReturn(Collections.singletonList(tracker));
+
+        tracker.setStatus("PROCESSED");
+        service.waitToFinishOngoingJob("123");
+
+        verify(repository, atLeastOnce()).findWipProcessById("123");
+    }
+
+    @Test
+    void testWaitToFinishOngoingJob_Timeout() {
+        when(repository.findWipProcessById("123")).thenReturn(Collections.singletonList(tracker));
+
+        long startTime = System.currentTimeMillis();
+        service.waitToFinishOngoingJob("123");
+        long duration = System.currentTimeMillis() - startTime;
+
+        assertTrue(duration >= ProcessExecutionTrackerService.MAX_WAIT_TIME);
+        verify(repository, atLeastOnce()).findWipProcessById("123");
+    }
 }
