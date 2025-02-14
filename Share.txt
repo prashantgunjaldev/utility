@@ -1,24 +1,22 @@
 import static org.mockito.Mockito.*;
-import static org.assertj.core.api.Assertions.assertThat;
-
-import java.util.Arrays;
-import java.util.List;
+import static org.junit.jupiter.api.Assertions.*;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-public class SixFeedFilesDeltaServiceTest {
+import java.time.LocalDateTime;
+import java.util.*;
 
-    private static final Logger log = LoggerFactory.getLogger(SixFeedFilesDeltaServiceTest.class);
+@ExtendWith(MockitoExtension.class)
+class SixFeedFilesDeltaServiceTest {
 
     @Mock
     private SixFeedFilesDeltaRepository fileDeltaRepository;
-
+    
     @Mock
     private SixFileAuditRepository fileAuditRepository;
 
@@ -28,34 +26,47 @@ public class SixFeedFilesDeltaServiceTest {
     @InjectMocks
     private SixFeedFilesDeltaService sixFeedFilesDeltaService;
 
+    private SixFeedFilesDeltaRequest feedFilesDeltaRequest;
+    
     @BeforeEach
     void setUp() {
-        MockitoAnnotations.openMocks(this);
+        feedFilesDeltaRequest = new SixFeedFilesDeltaRequest();
+        feedFilesDeltaRequest.setFeedId("feed-123");
+        feedFilesDeltaRequest.setProcessId("process-456");
+        feedFilesDeltaRequest.setProcessDate(LocalDateTime.now());
+        feedFilesDeltaRequest.setFileNames(Arrays.asList("file1.txt", "file2.txt"));
     }
 
     @Test
-    public void testAddDeltaFileFromDb() {
-        // Given
-        SixFeedFilesDeltaResponse feedResponse = new SixFeedFilesDeltaResponse();
-        feedResponse.setProcessId("123");
+    void testGetSixFlexDelta_ProcessAlreadyRunning() {
+        ProcessExecutionTracker tracker = new ProcessExecutionTracker();
+        when(trackerService.findWipProcessById(feedFilesDeltaRequest.getProcessId())).thenReturn(tracker);
 
-        SixFeedFilesDelta file1 = new SixFeedFilesDelta("fileA_001.txt");
-        SixFeedFilesDelta file2 = new SixFeedFilesDelta("fileA_002.txt");
-        SixFeedFilesDelta file3 = new SixFeedFilesDelta("fileB_001.txt");
+        SixFeedFilesDeltaResponse response = sixFeedFilesDeltaService.getSixFlexDelta(feedFilesDeltaRequest);
 
-        List<SixFeedFilesDelta> mockFiles = Arrays.asList(file1, file2, file3);
+        verify(trackerService, times(1)).waitToFinishOngoingJob(feedFilesDeltaRequest.getProcessId());
+        assertNotNull(response);
+    }
 
-        when(fileDeltaRepository.findProcessIdBasedDelta("123")).thenReturn(mockFiles);
+    @Test
+    void testGetSixFlexDelta_NewProcess() {
+        when(trackerService.findWipProcessById(feedFilesDeltaRequest.getProcessId())).thenReturn(null);
+        when(trackerService.save(any())).thenReturn(new ProcessExecutionTracker());
 
-        // When
-        sixFeedFilesDeltaService.addDeltaFileFromDb(feedResponse);
+        List<SixFeedFilesDelta> filesFromDb = new ArrayList<>();
+        when(fileDeltaRepository.findProcessIdBasedDelta(feedFilesDeltaRequest.getProcessId())).thenReturn(filesFromDb);
 
-        // Then
-        assertThat(feedResponse.getFileGroup()).isNotNull();
-        assertThat(feedResponse.getFileGroup().size()).isEqualTo(2); // Two BC groups (A & B)
+        SixFeedFilesDeltaResponse response = sixFeedFilesDeltaService.getSixFlexDelta(feedFilesDeltaRequest);
 
-        verify(fileDeltaRepository, times(1)).findProcessIdBasedDelta("123");
+        verify(trackerService, times(1)).save(any(ProcessExecutionTracker.class));
+        verify(fileDeltaRepository, times(1)).findProcessIdBasedDelta(feedFilesDeltaRequest.getProcessId());
+        assertNotNull(response);
+    }
 
-        log.info("Test completed successfully.");
+    @Test
+    void testGetSixFlexDelta_ExceptionHandling() {
+        when(trackerService.findWipProcessById(feedFilesDeltaRequest.getProcessId())).thenThrow(new RuntimeException("DB error"));
+
+        assertThrows(RuntimeException.class, () -> sixFeedFilesDeltaService.getSixFlexDelta(feedFilesDeltaRequest));
     }
 }
