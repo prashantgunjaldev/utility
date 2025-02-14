@@ -1,98 +1,33 @@
-import com.ubs.cumulus.acq.utility.api.v1.sixflex.delta.repository.ProcessExecutionTrackerRepository;
-import com.ubs.cumulus.acq.utility.api.v1.sixflex.delta.service.ProcessExecutionTrackerService;
-import com.ubs.cumulus.acq.utility.api.v1.sixflex.delta.model.ProcessExecutionTracker;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import scala.Option;
-import scala.collection.JavaConverters;
-import scala.collection.mutable.Buffer;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Collections;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
 
-@ExtendWith(MockitoExtension.class)
-class ProcessExecutionTrackerServiceTest {
+@ExtendWith(SpringExtension.class)
+@DataJpaTest
+public class ProcessExecutionTrackerRepositoryTest {
 
-    @Mock
+    @Autowired
     private ProcessExecutionTrackerRepository repository;
 
-    @InjectMocks
-    private ProcessExecutionTrackerService service;
-
-    private ProcessExecutionTracker tracker;
-
-    @BeforeEach
-    void setUp() {
-        tracker = new ProcessExecutionTracker();
-        tracker.setId("123");
-        tracker.setStatus("WIP");
-    }
-
     @Test
-    void testSave() {
-        when(repository.save(any())).thenReturn(tracker);
+    public void testFindWipProcessById() {
+        // Given
+        ProcessExecutionTracker tracker = new ProcessExecutionTracker();
+        tracker.setProcessId("123");
+        tracker.setStatus("PROCESSING");
+        repository.save(tracker);
 
-        ProcessExecutionTracker savedTracker = service.save(tracker);
+        // When
+        List<ProcessExecutionTracker> results = repository.findWipProcessById("123");
 
-        assertNotNull(savedTracker);
-        assertEquals("123", savedTracker.getId());
-        verify(repository, times(1)).save(tracker);
-    }
-
-    @Test
-    void testMarkProcessed() {
-        service.markProcessed(tracker);
-
-        assertEquals("PROCESSED", tracker.getStatus());
-        verify(repository, times(1)).save(tracker);
-    }
-
-    @Test
-    void testFindWipProcessById_Found() {
-        List<ProcessExecutionTracker> activeProcesses = Collections.singletonList(tracker);
-        when(repository.findWipProcessById("123")).thenReturn(activeProcesses);
-
-        ProcessExecutionTracker result = service.findWipProcessById("123");
-
-        assertNotNull(result);
-        assertEquals("123", result.getId());
-    }
-
-    @Test
-    void testFindWipProcessById_NotFound() {
-        when(repository.findWipProcessById("123")).thenReturn(Collections.emptyList());
-
-        ProcessExecutionTracker result = service.findWipProcessById("123");
-
-        assertNull(result);
-    }
-
-    @Test
-    void testWaitToFinishOngoingJob_Processed() {
-        when(repository.findWipProcessById("123")).thenReturn(Collections.singletonList(tracker));
-
-        tracker.setStatus("PROCESSED");
-        service.waitToFinishOngoingJob("123");
-
-        verify(repository, atLeastOnce()).findWipProcessById("123");
-    }
-
-    @Test
-    void testWaitToFinishOngoingJob_Timeout() {
-        when(repository.findWipProcessById("123")).thenReturn(Collections.singletonList(tracker));
-
-        long startTime = System.currentTimeMillis();
-        service.waitToFinishOngoingJob("123");
-        long duration = System.currentTimeMillis() - startTime;
-
-        assertTrue(duration >= ProcessExecutionTrackerService.MAX_WAIT_TIME);
-        verify(repository, atLeastOnce()).findWipProcessById("123");
+        // Then
+        assertThat(results).isNotEmpty();
+        assertThat(results.get(0).getProcessId()).isEqualTo("123");
     }
 }
