@@ -1,7 +1,42 @@
-<dependency>
-    <groupId>com.example</groupId>
-    <artifactId>logging-library</artifactId>
-    <version>1.0</version>
-    <scope>system</scope>
-    <systemPath>${project.basedir}/lib/logging-library-1.0.jar</systemPath>
-</dependency>
+package com.example.logging.repository;
+
+import com.example.logging.entity.ApiLog;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Repository;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+import javax.persistence.Query;
+import javax.transaction.Transactional;
+
+@Repository
+public class LogRepositoryCustom {
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    @Value("${logging.db.schema-name:public}")
+    private String schemaName;
+
+    @Value("${logging.db.table-name:api_logs}")
+    private String tableName;
+
+    @Transactional
+    public void saveLog(ApiLog log) {
+        if (!Boolean.parseBoolean(System.getProperty("logging.db.enabled", "false"))) {
+            return; // DB logging is disabled
+        }
+
+        String sql = String.format("INSERT INTO %s.%s (method, uri, status, request_body, response_body, timestamp) " +
+                                   "VALUES (:method, :uri, :status, :requestBody, :responseBody, :timestamp)", 
+                                   schemaName, tableName);
+
+        Query query = entityManager.createNativeQuery(sql);
+        query.setParameter("method", log.getMethod());
+        query.setParameter("uri", log.getUri());
+        query.setParameter("status", log.getStatus());
+        query.setParameter("requestBody", log.getRequestBody());
+        query.setParameter("responseBody", log.getResponseBody());
+        query.setParameter("timestamp", log.getTimestamp());
+        query.executeUpdate();
+    }
+}
