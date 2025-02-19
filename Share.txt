@@ -1,72 +1,7 @@
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
-
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.time.LocalDateTime;
-import java.util.*;
-
-@ExtendWith(MockitoExtension.class)
-class SixFeedFilesDeltaServiceTest {
-
-    @Mock
-    private SixFeedFilesDeltaRepository fileDeltaRepository;
-    
-    @Mock
-    private SixFileAuditRepository fileAuditRepository;
-
-    @Mock
-    private ProcessExecutionTrackerService trackerService;
-
-    @InjectMocks
-    private SixFeedFilesDeltaService sixFeedFilesDeltaService;
-
-    private SixFeedFilesDeltaRequest feedFilesDeltaRequest;
-    
-    @BeforeEach
-    void setUp() {
-        feedFilesDeltaRequest = new SixFeedFilesDeltaRequest();
-        feedFilesDeltaRequest.setFeedId("feed-123");
-        feedFilesDeltaRequest.setProcessId("process-456");
-        feedFilesDeltaRequest.setProcessDate(LocalDateTime.now());
-        feedFilesDeltaRequest.setFileNames(Arrays.asList("file1.txt", "file2.txt"));
-    }
-
-    @Test
-    void testGetSixFlexDelta_ProcessAlreadyRunning() {
-        ProcessExecutionTracker tracker = new ProcessExecutionTracker();
-        when(trackerService.findWipProcessById(feedFilesDeltaRequest.getProcessId())).thenReturn(tracker);
-
-        SixFeedFilesDeltaResponse response = sixFeedFilesDeltaService.getSixFlexDelta(feedFilesDeltaRequest);
-
-        verify(trackerService, times(1)).waitToFinishOngoingJob(feedFilesDeltaRequest.getProcessId());
-        assertNotNull(response);
-    }
-
-    @Test
-    void testGetSixFlexDelta_NewProcess() {
-        when(trackerService.findWipProcessById(feedFilesDeltaRequest.getProcessId())).thenReturn(null);
-        when(trackerService.save(any())).thenReturn(new ProcessExecutionTracker());
-
-        List<SixFeedFilesDelta> filesFromDb = new ArrayList<>();
-        when(fileDeltaRepository.findProcessIdBasedDelta(feedFilesDeltaRequest.getProcessId())).thenReturn(filesFromDb);
-
-        SixFeedFilesDeltaResponse response = sixFeedFilesDeltaService.getSixFlexDelta(feedFilesDeltaRequest);
-
-        verify(trackerService, times(1)).save(any(ProcessExecutionTracker.class));
-        verify(fileDeltaRepository, times(1)).findProcessIdBasedDelta(feedFilesDeltaRequest.getProcessId());
-        assertNotNull(response);
-    }
-
-    @Test
-    void testGetSixFlexDelta_ExceptionHandling() {
-        when(trackerService.findWipProcessById(feedFilesDeltaRequest.getProcessId())).thenThrow(new RuntimeException("DB error"));
-
-        assertThrows(RuntimeException.class, () -> sixFeedFilesDeltaService.getSixFlexDelta(feedFilesDeltaRequest));
-    }
-}
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>logging-library</artifactId>
+    <version>1.0</version>
+    <scope>system</scope>
+    <systemPath>${project.basedir}/lib/logging-library-1.0.jar</systemPath>
+</dependency>
