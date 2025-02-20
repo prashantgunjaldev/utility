@@ -1,15 +1,10 @@
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.orm.jpa.JpaTransactionManager;
-import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
-import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 
 import javax.persistence.EntityManagerFactory;
-import javax.sql.DataSource;
+import javax.persistence.Persistence;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -17,62 +12,59 @@ import java.util.Map;
 @ConditionalOnProperty(name = "logging.db.enabled", havingValue = "true")
 public class LoggingDataSourceConfig {
 
-    @Value("${logging.db.url:}")
+    @Value("${logging.db.url}")
     private String dbUrl;
 
-    @Value("${logging.db.username:}")
+    @Value("${logging.db.username}")
     private String dbUsername;
 
-    @Value("${logging.db.password:}")
+    @Value("${logging.db.password}")
     private String dbPassword;
 
-    @Value("${logging.db.platform:}")
+    @Value("${logging.db.platform:postgres}")
     private String dbPlatform;
 
     @Bean
-    @ConditionalOnProperty(name = "logging.db.url")
-    public DataSource loggingDataSource() {
-        return DataSourceBuilder.create()
-                .url(dbUrl)
-                .username(dbUsername)
-                .password(dbPassword)
-                .build();
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "logging.db.url")
-    public LocalContainerEntityManagerFactoryBean loggingEntityManagerFactory(
-            @Qualifier("loggingDataSource") DataSource loggingDataSource) {
-        LocalContainerEntityManagerFactoryBean em = new LocalContainerEntityManagerFactoryBean();
-        em.setDataSource(loggingDataSource);
-        em.setPackagesToScan("com.example.logging.entity");
-        em.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
-
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("hibernate.hbm2ddl.auto", "update");
+    public EntityManagerFactory loggingEntityManagerFactory() {
+        Map<String, String> properties = new HashMap<>();
+        properties.put("javax.persistence.jdbc.url", dbUrl);
+        properties.put("javax.persistence.jdbc.user", dbUsername);
+        properties.put("javax.persistence.jdbc.password", dbPassword);
         properties.put("hibernate.dialect", getHibernateDialect(dbPlatform));
+        properties.put("hibernate.hbm2ddl.auto", "update");
 
-        em.setJpaPropertyMap(properties);
-        em.setPersistenceUnitName("loggingPU"); // ✅ Separate persistence unit
-        return em;
+        return Persistence.createEntityManagerFactory("LoggingPersistenceUnit", properties);
     }
 
-    @Bean
-    @ConditionalOnProperty(name = "logging.db.url")
-    public JpaTransactionManager loggingTransactionManager(
-            @Qualifier("loggingEntityManagerFactory") EntityManagerFactory loggingEntityManagerFactory) {
-        return new JpaTransactionManager(loggingEntityManagerFactory);
-    }
-
-    private String getHibernateDialect(String platform) {
-        switch (platform.toLowerCase()) {
-            case "mysql": return "org.hibernate.dialect.MySQL8Dialect";
-            case "mariadb": return "org.hibernate.dialect.MariaDBDialect";
-            case "postgresql": return "org.hibernate.dialect.PostgreSQLDialect";
-            case "h2": return "org.hibernate.dialect.H2Dialect";
-            case "oracle": return "org.hibernate.dialect.Oracle12cDialect";
-            case "sqlserver": return "org.hibernate.dialect.SQLServerDialect";
-            default: throw new IllegalArgumentException("Unsupported database platform: " + platform);
+    private String getHibernateDialect(String dbPlatform) {
+        switch (dbPlatform.toLowerCase()) {
+            case "postgres":
+                return "org.hibernate.dialect.PostgreSQLDialect";
+            case "mysql":
+                return "org.hibernate.dialect.MySQL8Dialect";
+            case "oracle":
+                return "org.hibernate.dialect.Oracle12cDialect";
+            default:
+                throw new IllegalArgumentException("Unsupported database platform: " + dbPlatform);
         }
+    }
+}
+
+=====================
+
+import javax.persistence.EntityManager;
+import javax.persistence.EntityManagerFactory;
+
+@Component
+public class LoggingEntityManagerProvider {
+    
+    private final EntityManagerFactory entityManagerFactory;
+
+    public LoggingEntityManagerProvider(EntityManagerFactory loggingEntityManagerFactory) {
+        this.entityManagerFactory = loggingEntityManagerFactory;
+    }
+
+    public EntityManager getEntityManager() {
+        return entityManagerFactory.createEntityManager();
     }
 }
