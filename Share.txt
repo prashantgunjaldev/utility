@@ -29,20 +29,21 @@ public class LoggingDataSourceConfig {
     @Value("${logging.db.password:}")
     private String dbPassword;
 
-    @Value("${logging.db.driver-class-name:org.postgresql.Driver}")
-    private String dbDriver;
+    @Value("${logging.db.platform:}")
+    private String dbPlatform;
 
     @Bean
+    @ConditionalOnProperty(name = "logging.db.url") // ✅ Only create DataSource if URL is provided
     public DataSource loggingDataSource() {
         return DataSourceBuilder.create()
                 .url(dbUrl)
                 .username(dbUsername)
                 .password(dbPassword)
-                .driverClassName(dbDriver)
                 .build();
     }
 
     @Bean
+    @ConditionalOnProperty(name = "logging.db.url") // ✅ Only create EntityManager if URL exists
     public LocalContainerEntityManagerFactoryBean loggingEntityManagerFactory(
             @Qualifier("loggingDataSource") DataSource loggingDataSource) {
         LocalContainerEntityManagerFactoryBean em = new LocalContainerEntityManagerFactoryBean();
@@ -52,20 +53,38 @@ public class LoggingDataSourceConfig {
 
         Map<String, Object> properties = new HashMap<>();
         properties.put("hibernate.hbm2ddl.auto", "update");
-        properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
-        em.setJpaPropertyMap(properties);
+        properties.put("hibernate.dialect", getHibernateDialect(dbPlatform));
 
+        em.setJpaPropertyMap(properties);
         return em;
     }
 
     @Bean
+    @ConditionalOnProperty(name = "logging.db.url") // ✅ Skip if DB is disabled
     public JpaTransactionManager loggingTransactionManager(
             @Qualifier("loggingEntityManagerFactory") EntityManagerFactory loggingEntityManagerFactory) {
         return new JpaTransactionManager(loggingEntityManagerFactory);
     }
 
     @Bean
+    @ConditionalOnProperty(name = "logging.db.url") // ✅ Skip if DB is disabled
     public LogRepositoryCustom logRepositoryCustom() {
         return new LogRepositoryCustom();
+    }
+
+    private String getHibernateDialect(String platform) {
+        if (platform == null || platform.isEmpty()) {
+            throw new IllegalArgumentException("logging.db.platform must be provided when logging.db.enabled=true");
+        }
+        switch (platform.toLowerCase()) {
+            case "mysql": return "org.hibernate.dialect.MySQL8Dialect";
+            case "mariadb": return "org.hibernate.dialect.MariaDBDialect";
+            case "postgresql": return "org.hibernate.dialect.PostgreSQLDialect";
+            case "h2": return "org.hibernate.dialect.H2Dialect";
+            case "oracle": return "org.hibernate.dialect.Oracle12cDialect";
+            case "sqlserver": return "org.hibernate.dialect.SQLServerDialect";
+            default:
+                throw new IllegalArgumentException("Unsupported database platform: " + platform);
+        }
     }
 }
