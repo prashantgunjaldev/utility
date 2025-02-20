@@ -1,42 +1,71 @@
-package com.example.logging.repository;
+package com.example.logging.config;
 
-import com.example.logging.entity.ApiLog;
+import com.example.logging.repository.LogRepositoryCustom;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Repository;
-import javax.persistence.EntityManager;
-import javax.persistence.PersistenceContext;
-import javax.persistence.Query;
-import javax.transaction.Transactional;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 
-@Repository
-public class LogRepositoryCustom {
+import javax.persistence.EntityManagerFactory;
+import javax.sql.DataSource;
+import java.util.HashMap;
+import java.util.Map;
 
-    @PersistenceContext
-    private EntityManager entityManager;
+@Configuration
+@ConditionalOnProperty(name = "logging.db.enabled", havingValue = "true")
+public class LoggingDataSourceConfig {
 
-    @Value("${logging.db.schema-name:public}")
-    private String schemaName;
+    @Value("${logging.db.url:}")
+    private String dbUrl;
 
-    @Value("${logging.db.table-name:api_logs}")
-    private String tableName;
+    @Value("${logging.db.username:}")
+    private String dbUsername;
 
-    @Transactional
-    public void saveLog(ApiLog log) {
-        if (!Boolean.parseBoolean(System.getProperty("logging.db.enabled", "false"))) {
-            return; // DB logging is disabled
-        }
+    @Value("${logging.db.password:}")
+    private String dbPassword;
 
-        String sql = String.format("INSERT INTO %s.%s (method, uri, status, request_body, response_body, timestamp) " +
-                                   "VALUES (:method, :uri, :status, :requestBody, :responseBody, :timestamp)", 
-                                   schemaName, tableName);
+    @Value("${logging.db.driver-class-name:org.postgresql.Driver}")
+    private String dbDriver;
 
-        Query query = entityManager.createNativeQuery(sql);
-        query.setParameter("method", log.getMethod());
-        query.setParameter("uri", log.getUri());
-        query.setParameter("status", log.getStatus());
-        query.setParameter("requestBody", log.getRequestBody());
-        query.setParameter("responseBody", log.getResponseBody());
-        query.setParameter("timestamp", log.getTimestamp());
-        query.executeUpdate();
+    @Bean
+    public DataSource loggingDataSource() {
+        return DataSourceBuilder.create()
+                .url(dbUrl)
+                .username(dbUsername)
+                .password(dbPassword)
+                .driverClassName(dbDriver)
+                .build();
+    }
+
+    @Bean
+    public LocalContainerEntityManagerFactoryBean loggingEntityManagerFactory(
+            @Qualifier("loggingDataSource") DataSource loggingDataSource) {
+        LocalContainerEntityManagerFactoryBean em = new LocalContainerEntityManagerFactoryBean();
+        em.setDataSource(loggingDataSource);
+        em.setPackagesToScan("com.example.logging.entity");
+        em.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
+
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("hibernate.hbm2ddl.auto", "update");
+        properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+        em.setJpaPropertyMap(properties);
+
+        return em;
+    }
+
+    @Bean
+    public JpaTransactionManager loggingTransactionManager(
+            @Qualifier("loggingEntityManagerFactory") EntityManagerFactory loggingEntityManagerFactory) {
+        return new JpaTransactionManager(loggingEntityManagerFactory);
+    }
+
+    @Bean
+    public LogRepositoryCustom logRepositoryCustom() {
+        return new LogRepositoryCustom();
     }
 }
