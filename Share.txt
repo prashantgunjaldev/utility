@@ -1,57 +1,10 @@
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.jdbc.core.JdbcTemplate;
-
-import javax.sql.DataSource;
-import com.zaxxer.hikari.HikariDataSource;
-
-import java.util.Properties;
-
-@Configuration
-@ConditionalOnProperty(name = "logging.db.enabled", havingValue = "true")
-public class LoggingDataSourceConfig {
-
-    @Bean
-    public DataSource loggingDataSource(LoggingProperties loggingProperties) {
-        HikariDataSource dataSource = new HikariDataSource();
-        dataSource.setJdbcUrl(loggingProperties.getDbUrl());
-        dataSource.setUsername(loggingProperties.getDbUsername());
-        dataSource.setPassword(loggingProperties.getDbPassword());
-        dataSource.setDriverClassName(loggingProperties.getDbDriver());
-        dataSource.setMaximumPoolSize(10);
-        return dataSource;
-    }
-
-    @Bean
-    public JdbcTemplate loggingJdbcTemplate(DataSource loggingDataSource) {
-        return new JdbcTemplate(loggingDataSource);
-    }
-}
-
-==================
-
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Service;
-
-@Service
-@ConditionalOnProperty(name = "logging.enabled", havingValue = "true", matchIfMissing = true)
-public class LoggingService {
-
-    private final JdbcTemplate jdbcTemplate;
-    private final String tableName;
-    private final String schemaName;
-
-    public LoggingService(JdbcTemplate jdbcTemplate, LoggingProperties loggingProperties) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.schemaName = loggingProperties.getDbSchema();
-        this.tableName = loggingProperties.getDbTable();
-    }
-
-    public void logRequestResponse(String request, String response, String method, String url) {
-        String sql = String.format("INSERT INTO %s.%s (request, response, method, url, timestamp) VALUES (?, ?, ?, ?, now())", schemaName, tableName);
-        
-        jdbcTemplate.update(sql, request, response, method, url);
-    }
+private boolean shouldSkipLogging(String requestURI) {
+    return requestURI.matches(".*/swagger.*|.*/v3/api-docs.*|.*/webjars/.*|.*/favicon.ico") || 
+           requestURI.endsWith(".css") || 
+           requestURI.endsWith(".js") || 
+           requestURI.endsWith(".html") || 
+           requestURI.endsWith(".png") || 
+           requestURI.endsWith(".jpg") || 
+           requestURI.endsWith(".jpeg") || 
+           requestURI.endsWith(".gif");
 }
