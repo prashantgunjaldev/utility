@@ -1,30 +1,51 @@
-public void save(LogEntity logEntity, String schemaName, String tableName) {
-    EntityManager entityManager = entityManagerProvider.getEntityManager();
-    EntityTransaction transaction = entityManager.getTransaction();
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.EntityTransaction;
+import jakarta.persistence.Persistence;
+import java.util.HashMap;
+import java.util.Map;
 
-    try {
-        transaction.begin();
-        
-        String sql = String.format(
-            "INSERT INTO %s.%s (timestamp, type, payload, status, headers) VALUES (?, ?, ?, ?, ?)",
-            schemaName, tableName
-        );
+public class LoggingDatabaseService {
 
-        Query query = entityManager.createNativeQuery(sql);
-        query.setParameter(1, logEntity.getTimestamp());
-        query.setParameter(2, logEntity.getType());
-        query.setParameter(3, logEntity.getPayload());
-        query.setParameter(4, logEntity.getStatus());
-        query.setParameter(5, logEntity.getHeaders());
+    private EntityManagerFactory entityManagerFactory;
 
-        query.executeUpdate();
-        transaction.commit();
-    } catch (Exception e) {
-        if (transaction.isActive()) {
-            transaction.rollback();
+    public LoggingDatabaseService(String url, String username, String password, String dialect) {
+        this.entityManagerFactory = createEntityManagerFactory(url, username, password, dialect);
+    }
+
+    private EntityManagerFactory createEntityManagerFactory(String url, String username, String password, String dialect) {
+        Map<String, String> properties = new HashMap<>();
+        properties.put("jakarta.persistence.jdbc.url", url);
+        properties.put("jakarta.persistence.jdbc.user", username);
+        properties.put("jakarta.persistence.jdbc.password", password);
+        properties.put("jakarta.persistence.jdbc.driver", "org.postgresql.Driver"); // Change for MySQL or others
+        properties.put("hibernate.dialect", dialect);
+        properties.put("hibernate.hbm2ddl.auto", "update"); // Change as needed
+
+        return Persistence.createEntityManagerFactory("LoggingPersistenceUnit", properties);
+    }
+
+    public void save(LogEntity logEntity) {
+        EntityManager entityManager = entityManagerFactory.createEntityManager();
+        EntityTransaction transaction = entityManager.getTransaction();
+
+        try {
+            transaction.begin();
+            entityManager.persist(logEntity);
+            transaction.commit();
+        } catch (Exception e) {
+            if (transaction.isActive()) {
+                transaction.rollback();
+            }
+            throw e;
+        } finally {
+            entityManager.close();
         }
-        throw e;
-    } finally {
-        entityManager.close();
+    }
+
+    public void close() {
+        if (entityManagerFactory != null) {
+            entityManagerFactory.close();
+        }
     }
 }
