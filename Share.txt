@@ -1,2 +1,58 @@
-logging.level.org.springframework.jdbc.core=DEBUG
-logging.level.org.springframework.jdbc.core.JdbcTemplate=DEBUG
+import com.ubs.api.logging.repository.LogRepository;
+import com.ubs.api.logging.model.ApiLog;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+@ExtendWith(MockitoExtension.class)
+class LogRepositoryTest {
+
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
+    @InjectMocks
+    private LogRepository logRepository;
+
+    private ApiLog apiLog;
+
+    @BeforeEach
+    void setUp() {
+        apiLog = new ApiLog();
+        apiLog.setTxnId("txn123");
+        apiLog.setService("TestService");
+        apiLog.setType("INFO");
+        apiLog.setMethod("GET");
+        apiLog.setUri("/test");
+        apiLog.setIp("127.0.0.1");
+        apiLog.setStatus(200);
+        apiLog.setDuration(100);
+        apiLog.setCreatedOn(System.currentTimeMillis());
+    }
+
+    @Test
+    void testSaveLog_Success() {
+        when(jdbcTemplate.update(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(1);
+
+        logRepository.saveLog(apiLog);
+
+        verify(jdbcTemplate, times(1)).update(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void testSaveLog_Failure() {
+        when(jdbcTemplate.update(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(0);
+
+        logRepository.saveLog(apiLog);
+
+        verify(jdbcTemplate, times(1)).update(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+}
