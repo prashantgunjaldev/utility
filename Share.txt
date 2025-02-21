@@ -26,3 +26,176 @@
     <artifactId>javax.persistence-api</artifactId>
     <version>2.2</version>
 </dependency>
+
+======================
+package com.example.logging.config;
+
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+
+import javax.persistence.EntityManagerFactory;
+import javax.sql.DataSource;
+import java.util.HashMap;
+import java.util.Map;
+
+@Configuration
+@ConditionalOnProperty(name = "logging.db.enabled", havingValue = "true")
+@EnableJpaRepositories(
+    basePackages = "com.example.logging.repository",
+    entityManagerFactoryRef = "loggingEntityManagerFactory",
+    transactionManagerRef = "loggingTransactionManager"
+)
+public class LoggingJPAConfig {
+
+    @Bean(name = "loggingDataSource")
+    public DataSource loggingDataSource(LoggingProperties properties) {
+        HikariDataSource dataSource = new HikariDataSource();
+        dataSource.setDriverClassName(properties.getDriverClassName());
+        dataSource.setJdbcUrl(properties.getUrl());
+        dataSource.setUsername(properties.getUsername());
+        dataSource.setPassword(properties.getPassword());
+        dataSource.setMaximumPoolSize(5);  // Adjust as needed
+        return dataSource;
+    }
+
+    @Bean(name = "loggingEntityManagerFactory")
+    public LocalContainerEntityManagerFactoryBean loggingEntityManagerFactory(
+            EntityManagerFactoryBuilder builder,
+            @Qualifier("loggingDataSource") DataSource loggingDataSource) {
+        
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+        properties.put("hibernate.hbm2ddl.auto", "update");
+        properties.put("hibernate.show_sql", "true");
+
+        return builder
+                .dataSource(loggingDataSource)
+                .packages("com.example.logging.entity")  // Entities should be in this package
+                .persistenceUnit("LoggingPersistenceUnit")
+                .properties(properties)
+                .build();
+    }
+
+    @Bean(name = "loggingTransactionManager")
+    public JpaTransactionManager loggingTransactionManager(
+            @Qualifier("loggingEntityManagerFactory") EntityManagerFactory loggingEntityManagerFactory) {
+        return new JpaTransactionManager(loggingEntityManagerFactory);
+    }
+}
+
+
+
+=================
+package com.example.logging.config;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+@Getter
+@Setter
+@Configuration
+@ConfigurationProperties(prefix = "logging.db")
+public class LoggingProperties {
+    private String url;
+    private String username;
+    private String password;
+    private String driverClassName;
+    private String schemaName = "public";  // Default schema
+    private String tableName = "api_logs"; // Default table
+}
+
+===========================
+package com.example.logging.repository;
+
+import com.example.logging.config.LoggingProperties;
+import com.example.logging.entity.ApiLog;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Repository;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+import javax.transaction.Transactional;
+
+@Repository
+public class LogRepositoryCustomImpl implements LogRepositoryCustom {
+
+    @PersistenceContext(unitName = "LoggingPersistenceUnit")
+    private EntityManager entityManager;
+
+    private final LoggingProperties loggingProperties;
+
+    @Autowired
+    public LogRepositoryCustomImpl(LoggingProperties loggingProperties) {
+        this.loggingProperties = loggingProperties;
+    }
+
+    @Transactional
+    @Override
+    public void save(ApiLog logEntity) {
+        String tableName = loggingProperties.getTableName();
+        String schemaName = loggingProperties.getSchemaName();
+
+        String sql = "INSERT INTO " + schemaName + "." + tableName +
+                     " (timestamp, type, payload, status, headers) VALUES (:timestamp, :type, :payload, :status, :headers)";
+
+        entityManager.createNativeQuery(sql)
+                .setParameter("timestamp", logEntity.getTimestamp())
+                .setParameter("type", logEntity.getType())
+                .setParameter("payload", logEntity.getPayload())
+                .setParameter("status", logEntity.getStatus())
+                .setParameter("headers", logEntity.getHeaders())
+                .executeUpdate();
+    }
+}
+
+========================
+package com.example.logging.repository;
+
+import com.example.logging.config.LoggingProperties;
+import com.example.logging.entity.ApiLog;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Repository;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+import javax.transaction.Transactional;
+
+@Repository
+public class LogRepositoryCustomImpl implements LogRepositoryCustom {
+
+    @PersistenceContext(unitName = "LoggingPersistenceUnit")
+    private EntityManager entityManager;
+
+    private final LoggingProperties loggingProperties;
+
+    @Autowired
+    public LogRepositoryCustomImpl(LoggingProperties loggingProperties) {
+        this.loggingProperties = loggingProperties;
+    }
+
+    @Transactional
+    @Override
+    public void save(ApiLog logEntity) {
+        String tableName = loggingProperties.getTableName();
+        String schemaName = loggingProperties.getSchemaName();
+
+        String sql = "INSERT INTO " + schemaName + "." + tableName +
+                     " (timestamp, type, payload, status, headers) VALUES (:timestamp, :type, :payload, :status, :headers)";
+
+        entityManager.createNativeQuery(sql)
+                .setParameter("timestamp", logEntity.getTimestamp())
+                .setParameter("type", logEntity.getType())
+                .setParameter("payload", logEntity.getPayload())
+                .setParameter("status", logEntity.getStatus())
+                .setParameter("headers", logEntity.getHeaders())
+                .executeUpdate();
+    }
+}
+
