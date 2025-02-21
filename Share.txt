@@ -1,56 +1,36 @@
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
-import jakarta.persistence.*;
-import org.hibernate.jpa.HibernatePersistenceProvider;
-import javax.sql.DataSource;
-import java.util.HashMap;
-import java.util.Map;
+private EntityManagerFactory createEntityManagerFactory() {
+    // ✅ Step 1: Create Hikari DataSource
+    HikariConfig config = new HikariConfig();
+    config.setJdbcUrl(System.getProperty("logging.db.url", "jdbc:postgresql://localhost:5432/logging_db"));
+    config.setUsername(System.getProperty("logging.db.username", "logging_user"));
+    config.setPassword(System.getProperty("logging.db.password", "logging_pass"));
+    config.setDriverClassName(System.getProperty("logging.db.driver", "org.postgresql.Driver"));
+    config.setMaximumPoolSize(10);
 
-public class LogRepository {
+    DataSource dataSource = new HikariDataSource(config);
 
-    private final EntityManagerFactory entityManagerFactory;
-
-    public LogRepository() {
-        this.entityManagerFactory = createEntityManagerFactory();
+    if (dataSource == null) {
+        throw new IllegalStateException("DataSource is null!");
     }
 
-    private EntityManagerFactory createEntityManagerFactory() {
-        // ✅ Step 1: Manually Create Hikari DataSource
-        HikariConfig config = new HikariConfig();
-        config.setJdbcUrl("jdbc:postgresql://localhost:5432/logging_db");
-        config.setUsername("logging_user");
-        config.setPassword("logging_pass");
-        config.setDriverClassName("org.postgresql.Driver");
-        config.setMaximumPoolSize(10);
+    // ✅ Step 2: Hibernate JPA Properties (Replaces persistence.xml)
+    Map<String, Object> properties = new HashMap<>();
+    properties.put("javax.persistence.jdbc.driver", System.getProperty("logging.db.driver", "org.postgresql.Driver"));
+    properties.put("javax.persistence.jdbc.url", System.getProperty("logging.db.url", "jdbc:postgresql://localhost:5432/logging_db"));
+    properties.put("javax.persistence.jdbc.user", System.getProperty("logging.db.username", "logging_user"));
+    properties.put("javax.persistence.jdbc.password", System.getProperty("logging.db.password", "logging_pass"));
 
-        DataSource dataSource = new HikariDataSource(config);
+    properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+    properties.put("hibernate.hbm2ddl.auto", "update");
+    properties.put("hibernate.show_sql", "true");
 
-        // ✅ Step 2: Hibernate Configuration
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
-        properties.put("hibernate.hbm2ddl.auto", "update");
-        properties.put("hibernate.show_sql", "true");
-        properties.put("hibernate.connection.datasource", dataSource); // ✅ Correct Property
+    // ✅ Step 3: Create EntityManagerFactory Without persistence.xml
+    EntityManagerFactory emf = new HibernatePersistenceProvider()
+        .createEntityManagerFactory("LoggingPersistenceUnit", properties);
 
-        // ✅ Step 3: Use HibernatePersistenceProvider to manually create EntityManagerFactory
-        return new HibernatePersistenceProvider().createEntityManagerFactory("LoggingPersistenceUnit", properties);
+    if (emf == null) {
+        throw new IllegalStateException("EntityManagerFactory is null!");
     }
 
-    public void save(LogEntity logEntity) {
-        EntityManager entityManager = entityManagerFactory.createEntityManager();
-        EntityTransaction transaction = entityManager.getTransaction();
-
-        try {
-            transaction.begin();
-            entityManager.persist(logEntity);
-            transaction.commit();
-        } catch (Exception e) {
-            if (transaction.isActive()) {
-                transaction.rollback();
-            }
-            throw e;
-        } finally {
-            entityManager.close();
-        }
-    }
+    return emf;
 }
