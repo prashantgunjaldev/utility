@@ -1,51 +1,11 @@
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
-import jakarta.persistence.EntityTransaction;
-import jakarta.persistence.Persistence;
-import java.util.HashMap;
-import java.util.Map;
+config.setJdbcUrl("jdbc:postgresql://localhost:5432/mydb");
+        config.setUsername("user");
+        config.setPassword("password");
+        config.setDriverClassName("org.postgresql.Driver");
 
-public class LoggingDatabaseService {
-
-    private EntityManagerFactory entityManagerFactory;
-
-    public LoggingDatabaseService(String url, String username, String password, String dialect) {
-        this.entityManagerFactory = createEntityManagerFactory(url, username, password, dialect);
-    }
-
-    private EntityManagerFactory createEntityManagerFactory(String url, String username, String password, String dialect) {
-        Map<String, String> properties = new HashMap<>();
-        properties.put("jakarta.persistence.jdbc.url", url);
-        properties.put("jakarta.persistence.jdbc.user", username);
-        properties.put("jakarta.persistence.jdbc.password", password);
-        properties.put("jakarta.persistence.jdbc.driver", "org.postgresql.Driver"); // Change for MySQL or others
-        properties.put("hibernate.dialect", dialect);
-        properties.put("hibernate.hbm2ddl.auto", "update"); // Change as needed
-
-        return Persistence.createEntityManagerFactory("LoggingPersistenceUnit", properties);
-    }
-
-    public void save(LogEntity logEntity) {
-        EntityManager entityManager = entityManagerFactory.createEntityManager();
-        EntityTransaction transaction = entityManager.getTransaction();
-
-        try {
-            transaction.begin();
-            entityManager.persist(logEntity);
-            transaction.commit();
-        } catch (Exception e) {
-            if (transaction.isActive()) {
-                transaction.rollback();
-            }
-            throw e;
-        } finally {
-            entityManager.close();
-        }
-    }
-
-    public void close() {
-        if (entityManagerFactory != null) {
-            entityManagerFactory.close();
-        }
-    }
-}
+        // Pool settings
+        config.setMaximumPoolSize(10); // Max connections in pool
+        config.setMinimumIdle(5);      // Min idle connections
+        config.setIdleTimeout(30000);  // 30 sec timeout for idle connections
+        config.setMaxLifetime(1800000); // 30 min max connection lifetime
+        config.setConnectionTimeout(30000); // 30 sec timeout to get a connection
