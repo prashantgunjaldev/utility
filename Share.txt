@@ -1,10 +1,2 @@
-private boolean shouldSkipLogging(String requestURI) {
-    return requestURI.matches(".*/swagger.*|.*/v3/api-docs.*|.*/webjars/.*|.*/favicon.ico") || 
-           requestURI.endsWith(".css") || 
-           requestURI.endsWith(".js") || 
-           requestURI.endsWith(".html") || 
-           requestURI.endsWith(".png") || 
-           requestURI.endsWith(".jpg") || 
-           requestURI.endsWith(".jpeg") || 
-           requestURI.endsWith(".gif");
-}
+logging.level.org.springframework.jdbc.core=DEBUG
+logging.level.org.springframework.jdbc.core.JdbcTemplate=DEBUG
