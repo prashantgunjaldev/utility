@@ -1,11 +1,56 @@
-config.setJdbcUrl("jdbc:postgresql://localhost:5432/mydb");
-        config.setUsername("user");
-        config.setPassword("password");
-        config.setDriverClassName("org.postgresql.Driver");
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import jakarta.persistence.*;
+import org.hibernate.jpa.HibernatePersistenceProvider;
+import javax.sql.DataSource;
+import java.util.HashMap;
+import java.util.Map;
 
-        // Pool settings
-        config.setMaximumPoolSize(10); // Max connections in pool
-        config.setMinimumIdle(5);      // Min idle connections
-        config.setIdleTimeout(30000);  // 30 sec timeout for idle connections
-        config.setMaxLifetime(1800000); // 30 min max connection lifetime
-        config.setConnectionTimeout(30000); // 30 sec timeout to get a connection
+public class LogRepository {
+
+    private final EntityManagerFactory entityManagerFactory;
+
+    public LogRepository() {
+        this.entityManagerFactory = createEntityManagerFactory();
+    }
+
+    private EntityManagerFactory createEntityManagerFactory() {
+        // ✅ Step 1: Manually Create Hikari DataSource
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:postgresql://localhost:5432/logging_db");
+        config.setUsername("logging_user");
+        config.setPassword("logging_pass");
+        config.setDriverClassName("org.postgresql.Driver");
+        config.setMaximumPoolSize(10);
+
+        DataSource dataSource = new HikariDataSource(config);
+
+        // ✅ Step 2: Hibernate Configuration
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+        properties.put("hibernate.hbm2ddl.auto", "update");
+        properties.put("hibernate.show_sql", "true");
+        properties.put("hibernate.connection.datasource", dataSource); // ✅ Correct Property
+
+        // ✅ Step 3: Use HibernatePersistenceProvider to manually create EntityManagerFactory
+        return new HibernatePersistenceProvider().createEntityManagerFactory("LoggingPersistenceUnit", properties);
+    }
+
+    public void save(LogEntity logEntity) {
+        EntityManager entityManager = entityManagerFactory.createEntityManager();
+        EntityTransaction transaction = entityManager.getTransaction();
+
+        try {
+            transaction.begin();
+            entityManager.persist(logEntity);
+            transaction.commit();
+        } catch (Exception e) {
+            if (transaction.isActive()) {
+                transaction.rollback();
+            }
+            throw e;
+        } finally {
+            entityManager.close();
+        }
+    }
+}
