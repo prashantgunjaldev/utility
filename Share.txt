@@ -1,36 +1,17 @@
-private EntityManagerFactory createEntityManagerFactory() {
-    // ✅ Step 1: Create Hikari DataSource
-    HikariConfig config = new HikariConfig();
-    config.setJdbcUrl(System.getProperty("logging.db.url", "jdbc:postgresql://localhost:5432/logging_db"));
-    config.setUsername(System.getProperty("logging.db.username", "logging_user"));
-    config.setPassword(System.getProperty("logging.db.password", "logging_pass"));
-    config.setDriverClassName(System.getProperty("logging.db.driver", "org.postgresql.Driver"));
-    config.setMaximumPoolSize(10);
+<persistence xmlns="http://xmlns.jcp.org/xml/ns/persistence"
+             version="2.1">
+    <persistence-unit name="LoggingPersistenceUnit">
+        <properties>
+            <!-- Database Configuration -->
+            <property name="javax.persistence.jdbc.driver" value="org.postgresql.Driver"/>
+            <property name="javax.persistence.jdbc.url" value="jdbc:postgresql://localhost:5432/logging_db"/>
+            <property name="javax.persistence.jdbc.user" value="logging_user"/>
+            <property name="javax.persistence.jdbc.password" value="logging_pass"/>
 
-    DataSource dataSource = new HikariDataSource(config);
-
-    if (dataSource == null) {
-        throw new IllegalStateException("DataSource is null!");
-    }
-
-    // ✅ Step 2: Hibernate JPA Properties (Replaces persistence.xml)
-    Map<String, Object> properties = new HashMap<>();
-    properties.put("javax.persistence.jdbc.driver", System.getProperty("logging.db.driver", "org.postgresql.Driver"));
-    properties.put("javax.persistence.jdbc.url", System.getProperty("logging.db.url", "jdbc:postgresql://localhost:5432/logging_db"));
-    properties.put("javax.persistence.jdbc.user", System.getProperty("logging.db.username", "logging_user"));
-    properties.put("javax.persistence.jdbc.password", System.getProperty("logging.db.password", "logging_pass"));
-
-    properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
-    properties.put("hibernate.hbm2ddl.auto", "update");
-    properties.put("hibernate.show_sql", "true");
-
-    // ✅ Step 3: Create EntityManagerFactory Without persistence.xml
-    EntityManagerFactory emf = new HibernatePersistenceProvider()
-        .createEntityManagerFactory("LoggingPersistenceUnit", properties);
-
-    if (emf == null) {
-        throw new IllegalStateException("EntityManagerFactory is null!");
-    }
-
-    return emf;
-}
+            <!-- Hibernate Configuration -->
+            <property name="hibernate.dialect" value="org.hibernate.dialect.PostgreSQLDialect"/>
+            <property name="hibernate.hbm2ddl.auto" value="update"/>
+            <property name="hibernate.show_sql" value="true"/>
+        </properties>
+    </persistence-unit>
+</persistence>
