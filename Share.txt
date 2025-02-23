@@ -1,73 +1,96 @@
-import com.ubs.api.logging.model.ApiLog;
-import com.ubs.api.logging.repository.LogRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class LoggingServiceTest {
+class RequestResponseLoggingFilterTest {
 
     @Mock
-    private LogRepository mockLogRepository;
+    private LoggingService mockLoggingService;
 
-    private LoggingService loggingService;
+    @Mock
+    private HttpServletRequest mockRequest;
+
+    @Mock
+    private HttpServletResponse mockResponse;
+
+    @Mock
+    private FilterChain mockFilterChain;
+
+    private RequestResponseLoggingFilter filter;
 
     @BeforeEach
     void setUp() {
-        // Use the constructor that accepts a LogRepository
-        loggingService = new LoggingService(mockLogRepository);
+        // Create the filter with DB logging enabled by default
+        filter = new RequestResponseLoggingFilter(mockLoggingService, true);
     }
 
     @Test
-    void testLog_Success() {
-        // Arrange
-        ApiLog apiLog = new ApiLog();
-        apiLog.setTxnId("txn123");
-        apiLog.setService("TestService");
-        apiLog.setType("REQUEST");
-        apiLog.setMethod("GET");
-        apiLog.setUri("/test");
-        apiLog.setIp("127.0.0.1");
-        apiLog.setStatus(200);
-        apiLog.setDuration(100L);
-        // etc. (set additional fields if needed)
+    void testDoFilterInternal_LoggingEnabled() throws ServletException, IOException {
+        // Arrange: set up request stubs
+        when(mockRequest.getMethod()).thenReturn(\"GET\");
+        when(mockRequest.getRequestURI()).thenReturn(\"/test\");
+        when(mockRequest.getRemoteAddr()).thenReturn(\"127.0.0.1\");
+        when(mockRequest.getHeader(\"User-Agent\")).thenReturn(\"MockUserAgent\");
 
         // Act
-        loggingService.log(apiLog);
+        filter.doFilterInternal(mockRequest, mockResponse, mockFilterChain);
 
-        // Assert
-        verify(mockLogRepository, times(1)).saveLog(apiLog);
+        // Assert: verify LoggingService is called
+        verify(mockLoggingService, times(1)).log(any());
+        verify(mockFilterChain, times(1)).doFilter(mockRequest, mockResponse);
     }
 
     @Test
-    void testLog_RepositoryIsNull() {
-        // Create a new LoggingService with a null repository
-        LoggingService serviceWithNullRepo = new LoggingService((LogRepository) null);
+    void testDoFilterInternal_LoggingDisabled() throws ServletException, IOException {
+        // Re-initialize the filter with logging disabled
+        filter = new RequestResponseLoggingFilter(mockLoggingService, false);
 
-        ApiLog apiLog = new ApiLog();
-        serviceWithNullRepo.log(apiLog);
+        // Act
+        filter.doFilterInternal(mockRequest, mockResponse, mockFilterChain);
 
-        // The repository is null, so no interaction happens
-        verifyNoInteractions(mockLogRepository);
+        // Assert: logging should NOT occur
+        verify(mockLoggingService, never()).log(any());
+        // The filter chain should still proceed
+        verify(mockFilterChain, times(1)).doFilter(mockRequest, mockResponse);
     }
 
     @Test
-    void testLog_RepositoryThrowsException() {
-        // Arrange
-        ApiLog apiLog = new ApiLog();
-        doThrow(new RuntimeException("DB error")).when(mockLogRepository).saveLog(apiLog);
+    void testDoFilterInternal_CapturesApiLogFields() throws ServletException, IOException {
+        // Optionally, you can capture the ApiLog passed to LoggingService and assert fields
+        when(mockRequest.getMethod()).thenReturn(\"POST\");
+        when(mockRequest.getRequestURI()).thenReturn(\"/my-api\");
+        when(mockRequest.getRemoteAddr()).thenReturn(\"192.168.1.100\");
+        when(mockRequest.getHeader(\"User-Agent\")).thenReturn(\"MyTestAgent\");
 
-        // Act (no exception should escape, because LoggingService catches it)
-        loggingService.log(apiLog);
+        filter.doFilterInternal(mockRequest, mockResponse, mockFilterChain);
 
-        // Assert
-        // 1) The call was made
-        verify(mockLogRepository, times(1)).saveLog(apiLog);
-        // 2) The exception was caught (no test failure here)
+        // Capture the ApiLog argument
+        ArgumentCaptor<ApiLog> logCaptor = ArgumentCaptor.forClass(ApiLog.class);
+        verify(mockLoggingService).log(logCaptor.capture());
+        ApiLog capturedLog = logCaptor.getValue();
+
+        // Now assert fields
+        assertEquals(\"POST\", capturedLog.getMethod());
+        assertEquals(\"/my-api\", capturedLog.getUri());
+        assertEquals(\"192.168.1.100\", capturedLog.getIp());
+        // etc.
+
+        verify(mockFilterChain).doFilter(mockRequest, mockResponse);
     }
 }
