@@ -1,43 +1,73 @@
-<dependencies>
-    <!-- JUnit 5 (Jupiter) -->
-    <dependency>
-        <groupId>org.junit.jupiter</groupId>
-        <artifactId>junit-jupiter-api</artifactId>
-        <version>5.9.2</version>
-        <scope>test</scope>
-    </dependency>
-    <dependency>
-        <groupId>org.junit.jupiter</groupId>
-        <artifactId>junit-jupiter-engine</artifactId>
-        <version>5.9.2</version>
-        <scope>test</scope>
-    </dependency>
+import com.ubs.api.logging.model.ApiLog;
+import com.ubs.api.logging.repository.LogRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-    <!-- Mockito -->
-    <dependency>
-        <groupId>org.mockito</groupId>
-        <artifactId>mockito-core</artifactId>
-        <version>4.8.0</version>
-        <scope>test</scope>
-    </dependency>
-    <dependency>
-        <groupId>org.mockito</groupId>
-        <artifactId>mockito-junit-jupiter</artifactId>
-        <version>4.8.0</version>
-        <scope>test</scope>
-    </dependency>
+import static org.mockito.Mockito.*;
 
-    <!-- Spring Boot Test (If using Spring Boot) -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-test</artifactId>
-        <version>2.7.6</version>
-        <scope>test</scope>
-        <exclusions>
-            <exclusion>
-                <groupId>org.junit.vintage</groupId>
-                <artifactId>junit-vintage-engine</artifactId>
-            </exclusion>
-        </exclusions>
-    </dependency>
-</dependencies>
+@ExtendWith(MockitoExtension.class)
+class LoggingServiceTest {
+
+    @Mock
+    private LogRepository mockLogRepository;
+
+    private LoggingService loggingService;
+
+    @BeforeEach
+    void setUp() {
+        // Use the constructor that accepts a LogRepository
+        loggingService = new LoggingService(mockLogRepository);
+    }
+
+    @Test
+    void testLog_Success() {
+        // Arrange
+        ApiLog apiLog = new ApiLog();
+        apiLog.setTxnId("txn123");
+        apiLog.setService("TestService");
+        apiLog.setType("REQUEST");
+        apiLog.setMethod("GET");
+        apiLog.setUri("/test");
+        apiLog.setIp("127.0.0.1");
+        apiLog.setStatus(200);
+        apiLog.setDuration(100L);
+        // etc. (set additional fields if needed)
+
+        // Act
+        loggingService.log(apiLog);
+
+        // Assert
+        verify(mockLogRepository, times(1)).saveLog(apiLog);
+    }
+
+    @Test
+    void testLog_RepositoryIsNull() {
+        // Create a new LoggingService with a null repository
+        LoggingService serviceWithNullRepo = new LoggingService((LogRepository) null);
+
+        ApiLog apiLog = new ApiLog();
+        serviceWithNullRepo.log(apiLog);
+
+        // The repository is null, so no interaction happens
+        verifyNoInteractions(mockLogRepository);
+    }
+
+    @Test
+    void testLog_RepositoryThrowsException() {
+        // Arrange
+        ApiLog apiLog = new ApiLog();
+        doThrow(new RuntimeException("DB error")).when(mockLogRepository).saveLog(apiLog);
+
+        // Act (no exception should escape, because LoggingService catches it)
+        loggingService.log(apiLog);
+
+        // Assert
+        // 1) The call was made
+        verify(mockLogRepository, times(1)).saveLog(apiLog);
+        // 2) The exception was caught (no test failure here)
+    }
+}
