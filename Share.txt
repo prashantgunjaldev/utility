@@ -1,62 +1,36 @@
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 
-@Configuration
-@ConfigurationProperties(prefix = "api.logging.cleanup")
-public class ApiLoggingCleanupProperties {
-    private boolean enabled;
-    private int retentionDays;
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    public int getRetentionDays() {
-        return retentionDays;
-    }
-
-    public void setRetentionDays(int retentionDays) {
-        this.retentionDays = retentionDays;
-    }
-}
-
-
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import java.time.LocalDate;
 import java.util.logging.Logger;
 
 @Service
+@ConditionalOnProperty(name = "api.logging.cleanup.enabled", havingValue = "true", matchIfMissing = false)
 public class ApiLoggingCleanupService {
     private static final Logger logger = Logger.getLogger(ApiLoggingCleanupService.class.getName());
 
-    private final JdbcTemplate jdbcTemplate;
+    private final LogRepositoryService logRepositoryService;
     private final ApiLoggingCleanupProperties properties;
 
-    public ApiLoggingCleanupService(JdbcTemplate jdbcTemplate, ApiLoggingCleanupProperties properties) {
-        this.jdbcTemplate = jdbcTemplate;
+    public ApiLoggingCleanupService(LogRepositoryService logRepositoryService, ApiLoggingCleanupProperties properties) {
+        this.logRepositoryService = logRepositoryService;
         this.properties = properties;
     }
 
     @Scheduled(cron = "0 0 0 * * ?") // Runs once every 24 hours at midnight
     public void cleanOldLogs() {
-        if (!properties.isEnabled()) {
-            return;
-        }
-
         int days = properties.getRetentionDays();
-        String sql = "DELETE FROM api_logs WHERE created_on < ?";
-        LocalDate thresholdDate = LocalDate.now().minusDays(days);
-
-        int deletedRows = jdbcTemplate.update(sql, thresholdDate);
+        int deletedRows = logRepositoryService.deleteOldLogs(days);
         logger.info("Deleted " + deletedRows + " old log entries older than " + days + " days.");
     }
 }
+
+
+public int deleteOldLogs(int retentionDays) {
+        String sql = "DELETE FROM api_logs WHERE created_on < ?";
+        LocalDate thresholdDate = LocalDate.now().minusDays(retentionDays);
+        return jdbcTemplate.update(sql, thresholdDate);
+    }
 
 
 
