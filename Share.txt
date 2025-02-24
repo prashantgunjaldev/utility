@@ -1,42 +1,42 @@
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
 import java.util.logging.Logger;
 
-@Service
-@ConditionalOnProperty(name = "api.logging.cleanup.enabled", havingValue = "true", matchIfMissing = false)
-public class ApiLoggingCleanupService {
-    private static final Logger logger = Logger.getLogger(ApiLoggingCleanupService.class.getName());
+import static org.mockito.Mockito.*;
 
-    private final LogRepositoryService logRepositoryService;
-    private final ApiLoggingCleanupProperties properties;
+@ExtendWith(MockitoExtension.class)
+class ApiLoggingCleanupServiceTest {
 
-    public ApiLoggingCleanupService(LogRepositoryService logRepositoryService, ApiLoggingCleanupProperties properties) {
-        this.logRepositoryService = logRepositoryService;
-        this.properties = properties;
+    @Mock
+    private LogRepositoryService logRepositoryService;
+
+    @Mock
+    private ApiLoggingCleanupProperties properties;
+
+    private ApiLoggingCleanupService cleanupService;
+
+    @BeforeEach
+    void setUp() {
+        // Mock properties to return a retention period of 30 days
+        when(properties.getRetentionDays()).thenReturn(30);
+
+        cleanupService = new ApiLoggingCleanupService(logRepositoryService, properties);
     }
 
-    @Scheduled(cron = "0 0 0 * * ?") // Runs once every 24 hours at midnight
-    public void cleanOldLogs() {
-        int days = properties.getRetentionDays();
-        int deletedRows = logRepositoryService.deleteOldLogs(days);
-        logger.info("Deleted " + deletedRows + " old log entries older than " + days + " days.");
+    @Test
+    void testCleanOldLogs() {
+        // Mock the delete operation to return 5 deleted records
+        when(logRepositoryService.deleteOldLogs(30)).thenReturn(5);
+
+        // Execute the cleanup method
+        cleanupService.cleanOldLogs();
+
+        // Verify that deleteOldLogs(30) was called once
+        verify(logRepositoryService, times(1)).deleteOldLogs(30);
     }
 }
-
-
-public int deleteOldLogs(int retentionDays) {
-        String sql = "DELETE FROM api_logs WHERE created_on < ?";
-        LocalDate thresholdDate = LocalDate.now().minusDays(retentionDays);
-        return jdbcTemplate.update(sql, thresholdDate);
-    }
-
-
-
-api.logging.cleanup.enabled=true
-api.logging.cleanup.retention-days=30
-
-
-
-@EnableScheduling
