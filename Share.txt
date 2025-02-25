@@ -1,42 +1,241 @@
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.Mockito;
-import org.mockito.junit.jupiter.MockitoExtension;
+API Logging Module - Documentation and Integration Guide
 
-import java.util.logging.Logger;
+Overview
 
-import static org.mockito.Mockito.*;
+The API Logging Module is a reusable Spring Boot library that provides automatic logging for API requests and responses using SLF4J. It also offers optional database logging and an auto-cleanup service to manage log retention.
 
-@ExtendWith(MockitoExtension.class)
-class ApiLoggingCleanupServiceTest {
+Features
 
-    @Mock
-    private LogRepositoryService logRepositoryService;
+SLF4J Logging (Default): Logs API requests and responses using SLF4J.
 
-    @Mock
-    private ApiLoggingCleanupProperties properties;
+Optional Database Logging: Stores API logs in a database when enabled.
 
-    private ApiLoggingCleanupService cleanupService;
+Configurable Auto Cleanup: Removes logs older than a configurable retention period to prevent database bloat.
 
-    @BeforeEach
-    void setUp() {
-        // Mock properties to return a retention period of 30 days
-        when(properties.getRetentionDays()).thenReturn(30);
+Spring Boot Auto-Configuration: Automatically integrates into a Spring Boot application.
 
-        cleanupService = new ApiLoggingCleanupService(logRepositoryService, properties);
-    }
 
-    @Test
-    void testCleanOldLogs() {
-        // Mock the delete operation to return 5 deleted records
-        when(logRepositoryService.deleteOldLogs(30)).thenReturn(5);
 
-        // Execute the cleanup method
-        cleanupService.cleanOldLogs();
+---
 
-        // Verify that deleteOldLogs(30) was called once
-        verify(logRepositoryService, times(1)).deleteOldLogs(30);
-    }
-}
+1. Installation
+
+1.1 Add Dependency
+
+To use this library, add the following dependency in your Maven project:
+
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>api-logging-module</artifactId>
+    <version>1.0.0</version>
+</dependency>
+
+For multi-module projects, include this in your BOM:
+
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>api-logging-module</artifactId>
+            <version>1.0.0</version>
+            <scope>import</scope>
+            <type>pom</type>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+
+---
+
+2. Configuration
+
+2.1 Enabling SLF4J Logging (Default)
+
+By default, API request and response logs are written to SLF4J. This requires no additional configuration.
+
+Ensure you have an SLF4J implementation in your pom.xml, such as Logback:
+
+<dependency>
+    <groupId>ch.qos.logback</groupId>
+    <artifactId>logback-classic</artifactId>
+    <scope>runtime</scope>
+</dependency>
+
+
+---
+
+2.2 Enabling Database Logging
+
+To log API requests and responses to the database, set the following properties in application.properties or application.yml:
+
+application.properties
+
+api.logging.database.enabled=true
+api.logging.database.datasource.url=jdbc:mysql://localhost:3306/mydb
+api.logging.database.datasource.username=root
+api.logging.database.datasource.password=secret
+api.logging.database.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+api.logging.database.table-name=api_logs
+api.logging.database.schema=public
+
+application.yml
+
+api:
+  logging:
+    database:
+      enabled: true
+      datasource:
+        url: jdbc:mysql://localhost:3306/mydb
+        username: root
+        password: secret
+        driver-class-name: com.mysql.cj.jdbc.Driver
+      table-name: api_logs
+      schema: public
+
+
+---
+
+2.3 Configuring Auto Cleanup
+
+To enable automatic deletion of old log records, configure the retention period and enable cleanup:
+
+application.properties
+
+api.logging.cleanup.enabled=true
+api.logging.cleanup.retention-days=30
+
+application.yml
+
+api:
+  logging:
+    cleanup:
+      enabled: true
+      retention-days: 30
+
+The cleanup job runs once every 24 hours to delete logs older than retention-days.
+
+If api.logging.cleanup.enabled=false, logs will not be deleted.
+
+
+
+---
+
+3. Database Schema
+
+If database logging is enabled, the table structure should be as follows. The table name and schema are configurable.
+
+CREATE TABLE api_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    http_method VARCHAR(10) NOT NULL,
+    url TEXT NOT NULL,
+    request_headers TEXT,
+    request_body TEXT,
+    response_status INT NOT NULL,
+    response_headers TEXT,
+    response_body TEXT,
+    created_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+4. How It Works
+
+4.1 Request & Response Logging
+
+The module automatically logs all API requests and responses using a Spring Boot filter.
+
+If database logging is enabled, logs are stored in the database.
+
+If only SLF4J logging is enabled, logs are written to the console or a log file (depending on Logback configuration).
+
+
+4.2 Auto Cleanup Process
+
+The cleanup job runs daily and deletes logs older than retention-days.
+
+Uses JDBC Template for direct database execution without interfering with JPA.
+
+The cleanup query:
+
+
+DELETE FROM api_logs WHERE created_on < NOW() - INTERVAL 30 DAY;
+
+(Replace 30 with the configured retention period.)
+
+
+---
+
+5. Example Logs
+
+5.1 SLF4J Log Example
+
+[INFO] [2025-02-25 12:00:00] Incoming Request: GET /api/orders  
+[INFO] [2025-02-25 12:00:00] Request Headers: {Authorization=Bearer abc123}  
+[INFO] [2025-02-25 12:00:00] Request Body: {}  
+[INFO] [2025-02-25 12:00:00] Response Status: 200  
+[INFO] [2025-02-25 12:00:00] Response Body: {"orderId": 123, "status": "DELIVERED"}
+
+5.2 Database Log Entry Example
+
+
+---
+
+6. Additional Customization
+
+6.1 Changing Log Levels
+
+Modify logback.xml to control the log level:
+
+<logger name="com.example.apilogging" level="INFO"/>
+
+6.2 Custom Database Table Name
+
+The database table can be renamed using:
+
+api.logging.database.table-name=custom_log_table
+
+6.3 Disabling Request Body Logging
+
+To disable logging request bodies (for security reasons):
+
+api.logging.complete.enabled=false
+
+
+---
+
+7. Troubleshooting
+
+Issue: Logs Not Appearing in Database
+
+Solution:
+
+Ensure api.logging.database.enabled=true is set.
+
+Verify database connection details.
+
+Check application logs for errors related to database connectivity.
+
+
+Issue: Cleanup Not Working
+
+Solution:
+
+Ensure api.logging.cleanup.enabled=true is set.
+
+Check if the cleanup job is running in the logs.
+
+Run the cleanup query manually to verify database permissions.
+
+
+
+---
+
+8. Conclusion
+
+This module simplifies API logging and allows configurable database storage and automatic cleanup. By using this library, you can maintain observability while efficiently managing log data.
+
+
+---
+
+This should cover all key aspects. Let me know if you need modifications!
