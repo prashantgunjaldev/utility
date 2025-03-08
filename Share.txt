@@ -1,1 +1,39 @@
-src/main/resources/META-INF/spring.components
+
+
+@Configuration
+public class WebClientConfig {
+
+    @Bean
+    public WebClient webClient() {
+        String proxyHost = "your-proxy-host";
+        int proxyPort = 8080;
+        String proxyUsername = "your-username";
+        String proxyPassword = "your-password";
+
+        // Set up Proxy Authentication
+        BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
+        credsProvider.setCredentials(new AuthScope(proxyHost, proxyPort),
+                new UsernamePasswordCredentials(proxyUsername.toCharArray(), proxyPassword.toCharArray()));
+
+        // Set up Cookie Store
+        BasicCookieStore cookieStore = new BasicCookieStore();
+
+        // Configure HTTP Client with Proxy and Credentials
+        CloseableHttpClient httpClient = HttpClients.custom()
+                .setDefaultCredentialsProvider(credsProvider)
+                .setDefaultCookieStore(cookieStore)
+                .setConnectionManager(new PoolingHttpClientConnectionManager())
+                .build();
+
+        // Configure WebClient with custom HTTP Client
+        return WebClient.builder()
+                .clientConnector(new org.springframework.http.client.reactive.ReactorClientHttpConnector(
+                        reactor.netty.http.client.HttpClient.create()
+                                .proxy(proxy -> proxy
+                                        .type(reactor.netty.transport.ProxyProvider.Proxy.HTTP)
+                                        .address(new InetSocketAddress(proxyHost, proxyPort))
+                                        .username(proxyUsername)
+                                        .password(s -> proxyPassword))))
+                .build();
+    }
+}
