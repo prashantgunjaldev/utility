@@ -1,12 +1,3 @@
-// Configure Reactor Netty HTTP client with Proxy Authentication
-        HttpClient httpClient = HttpClient.create()
-                .proxy(proxy -> proxy
-                        .type(ProxyProvider.Proxy.HTTP)
-                        .address(new InetSocketAddress(proxyHost, proxyPort))
-                        .username(proxyUsername)
-                        .password(s -> proxyPassword));
-
-        // Build WebClient with the custom HttpClient
-        return WebClient.builder()
-                .clientConnector(new reactor.netty.transport.ClientTransportConnector(httpClient))
-                .build();
+ return CompletableFuture.supplyAsync(() -> fetchData(input.getEndpoint()), executorService)
+                .thenApply(this::processResult)
+                .join(); // Blocking here, but allows parallel execution
