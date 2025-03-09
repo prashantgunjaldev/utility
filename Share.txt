@@ -32,3 +32,20 @@ public class ParallelHttpService {
                 .onErrorResume(e -> Mono.just("Error fetching: " + url));
     }
 }
+
+
+public ParallelHttpService(WebClient.Builder webClientBuilder) {
+        this.webClient = webClientBuilder
+                .clientConnector(new reactor.netty.http.client.HttpClientConnector(httpClientWithProxy()))
+                .build();
+    }
+
+    private HttpClient httpClientWithProxy() {
+        return HttpClient.create()
+                .proxy(proxy -> proxy.type(ProxyProvider.Proxy.HTTP)
+                        .host("your.proxy.host")  // 🔹 Proxy Host
+                        .port(8080)               // 🔹 Proxy Port
+                        .username("yourUsername") // 🔹 (Optional) Proxy Username
+                        .password(pass -> "yourPassword") // 🔹 (Optional) Proxy Password
+                );
+    }
