@@ -49,3 +49,6 @@ public ParallelHttpService(WebClient.Builder webClientBuilder) {
                         .password(pass -> "yourPassword") // 🔹 (Optional) Proxy Password
                 );
     }
+
+.codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024)) // 10MB buffer
+                .build();
