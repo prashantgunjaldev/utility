@@ -1,3 +1,22 @@
  return CompletableFuture.supplyAsync(() -> fetchData(input.getEndpoint()), executorService)
                 .thenApply(this::processResult)
                 .join(); // Blocking here, but allows parallel execution
+
+@Override
+public YourOutputType process(YourInputType input) {
+    List<CompletableFuture<YourOutputType>> futures = input.getUrls().stream()
+        .map(url -> CompletableFuture.supplyAsync(() -> 
+            webClient.get()
+                .uri(url)
+                .retrieve()
+                .bodyToMono(YourOutputType.class)
+                .block()
+        , taskExecutor))  // ✅ Runs in parallel thread pool
+        .collect(Collectors.toList());
+
+    // Wait for all requests to complete
+    return futures.stream()
+        .map(CompletableFuture::join)  // ✅ Gather all results
+        .findFirst()  // Example: Pick first result
+        .orElse(null);
+}
