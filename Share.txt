@@ -20,3 +20,23 @@ public YourOutputType process(YourInputType input) {
         .findFirst()  // Example: Pick first result
         .orElse(null);
 }
+
+public WebClient webClient() {
+        // Create a Connection Pool Provider with high concurrency settings
+        ConnectionProvider provider = ConnectionProvider.builder("custom-webclient-pool")
+            .maxConnections(100) // 🚀 Increase max connections (default is 5)
+            .pendingAcquireMaxCount(1000) // 🚀 Allow 1000 waiting requests
+            .pendingAcquireTimeout(Duration.ofSeconds(5)) // Timeout for pending requests
+            .build();
+
+        HttpClient httpClient = HttpClient.create(provider)
+            .responseTimeout(Duration.ofSeconds(10)) // 🚀 Set response timeout
+            .doOnConnected(conn ->
+                conn.addHandlerLast(new io.netty.handler.timeout.ReadTimeoutHandler(10))
+                    .addHandlerLast(new io.netty.handler.timeout.WriteTimeoutHandler(10))
+            );
+
+        return WebClient.builder()
+            .clientConnector(new ReactorClientHttpConnector(httpClient))
+            .build();
+    }
