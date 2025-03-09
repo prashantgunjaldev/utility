@@ -1,54 +1,121 @@
-package com.exampl.batch.service;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
-import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
+import javax.xml.xpath.*;
+import java.io.ByteArrayInputStream;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
-import java.util.List;
+public class XMLParserUtil {
 
-@Service
-public class ParallelHttpService {
+    private static final String EVALUATION_PROCESSING_ERROR = "Error processing expression: ";
+    private static final XPathFactory XPATH_FACTORY = XPathFactory.newInstance();
+    private static final ThreadLocal<XPath> THREAD_LOCAL_XPATH = ThreadLocal.withInitial(XPATH_FACTORY::newXPath);
 
-    private final WebClient webClient;
+    public XmlParsedValuesMap createMapForTables(String xml, List<XPathMappingEntity> xpathMappings) {
+        // Use concurrent HashMap for parallel processing
+        Map<String, Object> flattenedMap = new ConcurrentHashMap<>();
+        Map<String, Object> listMap = new ConcurrentHashMap<>();
+        Map<String, XPathExpression> compiledExpressions = new HashMap<>();
 
-    public ParallelHttpService(WebClient.Builder webClientBuilder) {
-        this.webClient = webClientBuilder.build();
+        try {
+            XPath xpath = THREAD_LOCAL_XPATH.get();
+            for (XPathMappingEntity entity : xpathMappings) {
+                compiledExpressions.put(entity.getColumnName(), xpath.compile(entity.getXPath()));
+            }
+        } catch (XPathExpressionException e) {
+            throw new RuntimeException(EVALUATION_PROCESSING_ERROR + e.getMessage(), e);
+        }
+
+        InputSource inputSource = new InputSource(new ByteArrayInputStream(xml.getBytes()));
+
+        // Parallel processing of xpathMappings
+        xpathMappings.parallelStream().forEach(entity -> {
+            try {
+                XPathExpression expression = compiledExpressions.get(entity.getColumnName());
+                if ("string".equalsIgnoreCase(entity.getColumnType())) {
+                    flattenedMap.put(entity.getColumnName(), evaluate(expression, inputSource));
+                } else {
+                    listMap.put(entity.getColumnName(), getXmlValue(xml, entity.getXPath(), entity.getGroupbyColumn(), List.class));
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(EVALUATION_PROCESSING_ERROR + entity.getXPath(), e);
+            }
+        });
+
+        XmlParsedValuesMap xmlParsedValuesMap = new XmlParsedValuesMap();
+        xmlParsedValuesMap.setFlattenedValues(flattenedMap);
+        xmlParsedValuesMap.setListValuesMap(listMap);
+
+        return xmlParsedValuesMap;
     }
 
-    public List<String> fetchDataInParallel(List<String> urls) {
-        return Flux.fromIterable(urls)
-                .flatMap(this::fetchData, 10) // Limit concurrency if needed
-                .collectList()
-                .block(); // Convert Flux to List (blocking)
+    private String evaluate(XPathExpression expression, InputSource inputSource) {
+        try {
+            return expression.evaluate(inputSource);
+        } catch (XPathExpressionException e) {
+            throw new RuntimeException(EVALUATION_PROCESSING_ERROR + e.getMessage(), e);
+        }
     }
 
-    private Mono<String> fetchData(String url) {
-        return webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToMono(String.class)
-                .timeout(java.time.Duration.ofSeconds(15))
-                .onErrorResume(e -> Mono.just("Error fetching: " + url));
+    public Object getXmlValue(String xml, String xPathExpression, String groupBy, Class<?> type) {
+        if (xPathExpression == null || xPathExpression.isEmpty()) {
+            return null;
+        }
+
+        if (type.equals(String.class)) {
+            return evaluate(xPathExpression, xml);
+        } else if (type.equals(List.class)) {
+            List<String> stringList = nodeList(xPathExpression, xml)
+                    .map(Node::getTextContent)
+                    .map(this::checkString)
+                    .collect(Collectors.toList());
+
+            if (groupBy != null && !groupBy.isEmpty()) {
+                return stringList.stream()
+                        .map(this::checkString)
+                        .map(s -> new XmlListValues(null, groupBy, s))
+                        .distinct()
+                        .collect(Collectors.toList());
+            }
+
+            return stringList;
+        }
+
+        return null;
+    }
+
+    private Stream<Node> nodeList(String xPathExpression, String xml) {
+        try {
+            InputSource inputSource = new InputSource(new ByteArrayInputStream(xml.getBytes()));
+            NodeList nl = (NodeList) THREAD_LOCAL_XPATH.get().evaluate(xPathExpression, inputSource, XPathConstants.NODESET);
+
+            Node[] nodes = new Node[nl.getLength()];
+            for (int i = 0; i < nl.getLength(); i++) {
+                nodes[i] = nl.item(i);
+            }
+            return Arrays.stream(nodes);
+
+        } catch (XPathExpressionException e) {
+            throw new RuntimeException(EVALUATION_PROCESSING_ERROR + xPathExpression, e);
+        }
+    }
+
+    private String evaluate(String expression, String xml) {
+        try {
+            InputSource inputSource = new InputSource(new ByteArrayInputStream(xml.getBytes()));
+            return Optional.ofNullable(THREAD_LOCAL_XPATH.get().evaluate(expression, inputSource))
+                    .filter(str -> !str.isBlank())
+                    .map(this::checkString)
+                    .orElse(null);
+        } catch (XPathExpressionException e) {
+            throw new RuntimeException(EVALUATION_PROCESSING_ERROR + expression, e);
+        }
+    }
+
+    private String checkString(String value) {
+        return value != null ? value.trim() : "";
     }
 }
-
-
-public ParallelHttpService(WebClient.Builder webClientBuilder) {
-        this.webClient = webClientBuilder
-                .clientConnector(new reactor.netty.http.client.HttpClientConnector(httpClientWithProxy()))
-                .build();
-    }
-
-    private HttpClient httpClientWithProxy() {
-        return HttpClient.create()
-                .proxy(proxy -> proxy.type(ProxyProvider.Proxy.HTTP)
-                        .host("your.proxy.host")  // 🔹 Proxy Host
-                        .port(8080)               // 🔹 Proxy Port
-                        .username("yourUsername") // 🔹 (Optional) Proxy Username
-                        .password(pass -> "yourPassword") // 🔹 (Optional) Proxy Password
-                );
-    }
-
-.codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024)) // 10MB buffer
-                .build();
