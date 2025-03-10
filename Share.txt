@@ -53,8 +53,7 @@ public class XMLParserUtil {
         Map<String, Object> listMap = new HashMap<>();
 
         try {
-            DocumentBuilder builder = documentBuilderThreadLocal.get();
-            Document doc = builder.parse(new InputSource(new StringReader(xml)));
+            Document doc = parseXMLToDocument(xml); // Parse only once
 
             for (Map.Entry<String, XPathExpression> entry : compiledXPaths.entrySet()) {
                 fetchAndStoreNodeValue(entry, doc, listMap);
@@ -67,6 +66,7 @@ public class XMLParserUtil {
             log.info("Parsed XML successfully: flattenedMap size = {}, listMap size = {}", flattenedMap.size(), listMap.size());
             parsedValues.setFlattenedValuesMap(flattenedMap);
             parsedValues.setListValuesMap(listMap);
+            parsedValues.setDocument(doc); // Store document for future queries
         } catch (Exception e) {
             throw new RuntimeException("Error processing XML using XPath", e);
         }
@@ -86,14 +86,14 @@ public class XMLParserUtil {
         }
     }
 
-    public Object getXmlNodeValue(String xPathExpression, Class<?> type, String xmlContent) {
+    public Object getXmlNodeValue(String xPathExpression, Class<?> type, Document doc) {
         try {
-            DocumentBuilder builder = documentBuilderThreadLocal.get();
-            Document doc = builder.parse(new InputSource(new StringReader(xmlContent)));
-
-            return nodeListV2(xPathExpression, doc).map(Node::getTextContent).map(this::checkString).collect(Collectors.toList());
+            return nodeListV2(xPathExpression, doc)
+                    .map(Node::getTextContent)
+                    .map(this::checkString)
+                    .collect(Collectors.toList());
         } catch (Exception e) {
-            log.error("Error parsing XML with XPath '{}': {}", xPathExpression, e.getMessage());
+            log.error("Error processing XML with XPath '{}': {}", xPathExpression, e.getMessage());
             return null;
         }
     }
@@ -102,13 +102,9 @@ public class XMLParserUtil {
         return value != null ? value.trim() : "";
     }
 
-    private static XPathExpression getXPathExpression(String xPathExpression) throws XPathExpressionException {
-        return XPATH.compile(xPathExpression);
-    }
-
     public Stream<Node> nodeListV2(String xPathExpression, Document doc) {
         try {
-            XPathExpression expr = getXPathExpression(xPathExpression);
+            XPathExpression expr = compiledXPaths.getOrDefault(xPathExpression, getXPathExpression(xPathExpression));
             NodeList nl = (NodeList) expr.evaluate(doc, XPathConstants.NODESET);
             Node[] nodes = new Node[nl.getLength()];
 
@@ -122,6 +118,10 @@ public class XMLParserUtil {
         }
     }
 
+    private static XPathExpression getXPathExpression(String xPathExpression) throws XPathExpressionException {
+        return XPATH.compile(xPathExpression);
+    }
+
     public String evaluate(String expression, Node node) {
         if (node == null) {
             return null;
@@ -132,11 +132,20 @@ public class XMLParserUtil {
             throw new RuntimeException(EVALUATION_PROCESSING_ERROR + expression, e);
         }
     }
+
+    private Document parseXMLToDocument(String xmlContent) {
+        try {
+            DocumentBuilder builder = documentBuilderThreadLocal.get();
+            return builder.parse(new InputSource(new StringReader(xmlContent)));
+        } catch (Exception e) {
+            throw new RuntimeException("Error parsing XML content", e);
+        }
+    }
 }
 
- try (FileWriter writer = new FileWriter(new File(filePath))) {
-            writer.write(xmlContent);
-            System.out.println("XML file written successfully to: " + filePath);
-        } catch (IOException e) {
-            System.err.println("Error writing XML file: " + e.getMessage());
-        }
+try (FileWriter writer = new FileWriter(new File(filePath))) {
+    writer.write(xmlContent);
+    System.out.println("XML file written successfully to: " + filePath);
+} catch (IOException e) {
+    System.err.println("Error writing XML file: " + e.getMessage());
+}
