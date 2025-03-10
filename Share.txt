@@ -133,3 +133,10 @@ public class XMLParserUtil {
         }
     }
 }
+
+ try (FileWriter writer = new FileWriter(new File(filePath))) {
+            writer.write(xmlContent);
+            System.out.println("XML file written successfully to: " + filePath);
+        } catch (IOException e) {
+            System.err.println("Error writing XML file: " + e.getMessage());
+        }
