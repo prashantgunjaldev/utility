@@ -1,7 +1,8 @@
-# Function to retrieve secrets from multiple Azure Key Vaults using Azure CLI
+# Function to retrieve secrets from multiple Azure Key Vaults and save to a JSON file
 function Get-AKVSecrets {
     param (
-        [string[]]$vaultNames # List of Azure Key Vault names
+        [string[]]$vaultNames,   # List of Azure Key Vault names
+        [string]$outputFile = "secrets.json"  # Output file name
     )
 
     # Initialize an array to store secrets
@@ -19,14 +20,15 @@ function Get-AKVSecrets {
                     # Retrieve the secret value
                     $secretValue = az keyvault secret show --vault-name $vault --name $secretName --query "value" -o tsv
 
-                    # Create an object for better display
-                    $secretObject = [PSCustomObject]@{
-                        KeyVault = $vault
-                        Name     = $secretName
-                        Value    = $secretValue
+                    # Create a JSON object
+                    $secretObject = @{
+                        createOrUpdate = "yes"
+                        comments       = $null
+                        name           = $secretName
+                        value          = $secretValue
                     }
 
-                    # Store the secret in the array
+                    # Store the secret object in the array
                     $allSecrets += $secretObject
                 }
                 catch {
@@ -39,10 +41,13 @@ function Get-AKVSecrets {
         }
     }
 
-    # Display results
-    return $allSecrets | Format-Table -AutoSize
+    # Convert to JSON and save to a file
+    $jsonOutput = $allSecrets | ConvertTo-Json -Depth 3
+    $jsonOutput | Out-File -Encoding utf8 $outputFile
+
+    Write-Host "Secrets saved to $outputFile"
 }
 
-# Example usage: Provide your Key Vault names in the array
+# Example usage: Provide your Key Vault names
 $vaultNames = @("YourKeyVault1", "YourKeyVault2") # Replace with actual Key Vault names
-Get-AKVSecrets -vaultNames $vaultNames
+Get-AKVSecrets -vaultNames $vaultNames -outputFile "dev-akv-secrets-v2.json"
