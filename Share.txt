@@ -1,151 +1,48 @@
-import org.w3c.dom.*;
-import org.xml.sax.InputSource;
+# Function to retrieve secrets from multiple Azure Key Vaults using Azure CLI
+function Get-AKVSecrets {
+    param (
+        [string[]]$vaultNames # List of Azure Key Vault names
+    )
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.xpath.*;
-import java.io.StringReader;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+    # Initialize an array to store secrets
+    $allSecrets = @()
 
-public class XMLParserUtil {
-    private static final String EVALUATION_PROCESSING_ERROR = "Error processing expression ";
+    foreach ($vault in $vaultNames) {
+        Write-Host "Fetching secrets from Key Vault: $vault"
 
-    private static final ThreadLocal<DocumentBuilder> documentBuilderThreadLocal = ThreadLocal.withInitial(() -> {
         try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setIgnoringComments(true);
-            factory.setIgnoringElementContentWhitespace(true);
-            return factory.newDocumentBuilder();
-        } catch (Exception e) {
-            throw new RuntimeException("Error initializing DocumentBuilder", e);
-        }
-    });
+            # Get all secret names from the Key Vault
+            $secrets = az keyvault secret list --vault-name $vault --query "[].name" -o json | ConvertFrom-Json
 
-    private static final XPathFactory XPATH_FACTORY = XPathFactory.newInstance();
-    private static final XPath XPATH = XPATH_FACTORY.newXPath();
+            foreach ($secretName in $secrets) {
+                try {
+                    # Retrieve the secret value
+                    $secretValue = az keyvault secret show --vault-name $vault --name $secretName --query "value" -o tsv
 
-    private final Map<String, XPathExpression> compiledXPathsForStrings = new ConcurrentHashMap<>();
-    private final Map<String, XPathExpression> compiledXPaths = new ConcurrentHashMap<>();
+                    # Create an object for better display
+                    $secretObject = [PSCustomObject]@{
+                        KeyVault = $vault
+                        Name     = $secretName
+                        Value    = $secretValue
+                    }
 
-    public void setUp(List<XPathMappingEntity> xpathMappings) {
-        try {
-            for (XPathMappingEntity entity : xpathMappings) {
-                XPathExpression compiledExpr = XPATH.compile(entity.getXpath());
-                if ("String".equals(entity.getColumn_type())) {
-                    compiledXPathsForStrings.put(entity.getColumn_name(), compiledExpr);
-                } else {
-                    compiledXPaths.put(entity.getColumn_name(), compiledExpr);
+                    # Store the secret in the array
+                    $allSecrets += $secretObject
+                }
+                catch {
+                    Write-Warning "Failed to retrieve secret value for: $secretName in $vault"
                 }
             }
-            log.info("XPath expressions compiled and cached");
-        } catch (XPathExpressionException e) {
-            log.error("Error while compiling XPath: {}", e.getMessage());
+        }
+        catch {
+            Write-Warning "Failed to fetch secrets from Key Vault: $vault"
         }
     }
 
-    public XmlParsedValuesMap parseXML(String xml) {
-        XmlParsedValuesMap parsedValues = new XmlParsedValuesMap();
-        Map<String, Object> flattenedMap = new HashMap<>();
-        Map<String, Object> listMap = new HashMap<>();
-
-        try {
-            Document doc = parseXMLToDocument(xml); // Parse only once
-
-            for (Map.Entry<String, XPathExpression> entry : compiledXPaths.entrySet()) {
-                fetchAndStoreNodeValue(entry, doc, listMap);
-            }
-
-            for (Map.Entry<String, XPathExpression> entry : compiledXPathsForStrings.entrySet()) {
-                fetchAndStoreNodeValue(entry, doc, flattenedMap);
-            }
-
-            log.info("Parsed XML successfully: flattenedMap size = {}, listMap size = {}", flattenedMap.size(), listMap.size());
-            parsedValues.setFlattenedValuesMap(flattenedMap);
-            parsedValues.setListValuesMap(listMap);
-            parsedValues.setDocument(doc); // Store document for future queries
-        } catch (Exception e) {
-            throw new RuntimeException("Error processing XML using XPath", e);
-        }
-
-        return parsedValues;
-    }
-
-    private static void fetchAndStoreNodeValue(Map.Entry<String, XPathExpression> entry, Document doc, Map<String, Object> targetMap) {
-        String columnName = entry.getKey();
-        XPathExpression expr = entry.getValue();
-
-        try {
-            String result = expr.evaluate(doc);
-            targetMap.put(columnName, result.isEmpty() ? null : result);
-        } catch (Exception e) {
-            log.error("Error evaluating XPath '{}': {}", columnName, e.getMessage());
-        }
-    }
-
-    public Object getXmlNodeValue(String xPathExpression, Class<?> type, Document doc) {
-        try {
-            return nodeListV2(xPathExpression, doc)
-                    .map(Node::getTextContent)
-                    .map(this::checkString)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            log.error("Error processing XML with XPath '{}': {}", xPathExpression, e.getMessage());
-            return null;
-        }
-    }
-
-    private String checkString(String value) {
-        return value != null ? value.trim() : "";
-    }
-
-    public Stream<Node> nodeListV2(String xPathExpression, Document doc) {
-        try {
-            XPathExpression expr = compiledXPaths.getOrDefault(xPathExpression, getXPathExpression(xPathExpression));
-            NodeList nl = (NodeList) expr.evaluate(doc, XPathConstants.NODESET);
-            Node[] nodes = new Node[nl.getLength()];
-
-            for (int i = 0; i < nl.getLength(); i++) {
-                nodes[i] = nl.item(i);
-            }
-
-            return Stream.of(nodes);
-        } catch (XPathExpressionException e) {
-            throw new RuntimeException(EVALUATION_PROCESSING_ERROR + xPathExpression, e);
-        }
-    }
-
-    private static XPathExpression getXPathExpression(String xPathExpression) throws XPathExpressionException {
-        return XPATH.compile(xPathExpression);
-    }
-
-    public String evaluate(String expression, Node node) {
-        if (node == null) {
-            return null;
-        }
-        try {
-            return XPATH.evaluate(expression, node);
-        } catch (XPathExpressionException e) {
-            throw new RuntimeException(EVALUATION_PROCESSING_ERROR + expression, e);
-        }
-    }
-
-    private Document parseXMLToDocument(String xmlContent) {
-        try {
-            DocumentBuilder builder = documentBuilderThreadLocal.get();
-            return builder.parse(new InputSource(new StringReader(xmlContent)));
-        } catch (Exception e) {
-            throw new RuntimeException("Error parsing XML content", e);
-        }
-    }
+    # Display results
+    return $allSecrets | Format-Table -AutoSize
 }
 
-try (FileWriter writer = new FileWriter(new File(filePath))) {
-    writer.write(xmlContent);
-    System.out.println("XML file written successfully to: " + filePath);
-} catch (IOException e) {
-    System.err.println("Error writing XML file: " + e.getMessage());
-}
+# Example usage: Provide your Key Vault names in the array
+$vaultNames = @("YourKeyVault1", "YourKeyVault2") # Replace with actual Key Vault names
+Get-AKVSecrets -vaultNames $vaultNames
