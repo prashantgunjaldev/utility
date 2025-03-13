@@ -1,188 +1,91 @@
+package com.ubs.cumulus.parsingService.xml.morningstar.api;
+
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import com.ubs.cumulus.parsingService.xml.morningstar.service.MorningStarCreateEvents;
+import com.ubs.cumulus.parsingService.xml.morningstar.util.LockManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClient.RequestHeadersUriSpec;
-import org.springframework.web.reactive.function.client.WebClient.RequestHeadersSpec;
-import org.springframework.web.reactive.function.client.WebClient.ResponseSpec;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.core.publisher.Mono;
-import reactor.test.StepVerifier;
-
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.security.core.Authentication;
+import javax.servlet.http.HttpServletRequest;
 
 @ExtendWith(MockitoExtension.class)
-class ParallelHttpServiceTest {
+class MorningStarTriggerControllerTest {
+
+    private MockMvc mockMvc;
 
     @Mock
-    private WebClient webClient;
+    private MorningStarCreateEvents morningStarCreateEvents;
 
     @Mock
-    private WebClient.RequestHeadersUriSpec<?> requestHeadersUriSpec;
+    private LockManager lockManager;
 
     @Mock
-    private WebClient.RequestHeadersSpec<?> requestHeadersSpec;
+    private Authentication authentication;
 
     @Mock
-    private WebClient.ResponseSpec responseSpec;
+    private HttpServletRequest request;
 
     @InjectMocks
-    private ParallelHttpService parallelHttpService;
+    private MorningStarTriggerController controller;
 
     @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-
-        when(webClient.get()).thenReturn((RequestHeadersUriSpec<?>) requestHeadersUriSpec);
-        when(requestHeadersUriSpec.uri(any(String.class))).thenReturn((RequestHeadersSpec<?>) requestHeadersSpec);
-        when(requestHeadersSpec.headers(any())).thenReturn(requestHeadersSpec);
-        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
+    void setup() {
+        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
-    // ✅ 1. Successful Response Test (Already Covered)
     @Test
-    void fetchData_shouldReturnResponseOnSuccess() {
-        String url = "http://example.com";
-        List<String> cookies = List.of("cookie1", "cookie2");
+    void testStartJob_WhenLockIsAcquired_ShouldReturnSuccess() throws Exception {
+        when(lockManager.tryLock()).thenReturn(true);
 
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("Success"));
+        String requestBody = "{ \"process_id\": \"12345\" }";
 
-        Mono<String> result = parallelHttpService.fetchData(url, Map.of("cookies", cookies));
+        mockMvc.perform(post("/startJob")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody))
+                .andExpect(status().isOk());
 
-        StepVerifier.create(result)
-                .expectNext("Success")
-                .verifyComplete();
+        verify(lockManager).tryLock();
+        verify(lockManager).unlock();
     }
 
-    // ✅ 2. Failure Case (Already Covered)
     @Test
-    void fetchData_shouldReturnErrorMessageOnFailure() {
-        String url = "http://example.com";
-        List<String> cookies = List.of("cookie1", "cookie2");
+    void testStartJob_WhenLockIsNotAcquired_ShouldReturnTooManyRequests() throws Exception {
+        when(lockManager.tryLock()).thenReturn(false);
 
-        when(responseSpec.bodyToMono(String.class))
-                .thenReturn(Mono.error(new WebClientResponseException(500, "Internal Server Error", null, null, null)));
+        String requestBody = "{ \"process_id\": \"12345\" }";
 
-        Mono<String> result = parallelHttpService.fetchData(url, Map.of("cookies", cookies));
+        mockMvc.perform(post("/startJob")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody))
+                .andExpect(status().isTooManyRequests());
 
-        StepVerifier.create(result)
-                .expectNextMatches(response -> response.startsWith("Error fetching"))
-                .verifyComplete();
+        verify(lockManager).tryLock();
+        verify(lockManager, never()).unlock();
     }
 
-    // ✅ 3. Empty Response Handling
     @Test
-    void fetchData_shouldHandleEmptyResponse() {
-        String url = "http://example.com";
-        List<String> cookies = List.of("cookie1");
+    void testStartJob_WhenExceptionOccurs_ShouldReturnInternalServerError() throws Exception {
+        when(lockManager.tryLock()).thenThrow(new RuntimeException("Test Exception"));
 
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just(""));
+        String requestBody = "{ \"process_id\": \"12345\" }";
 
-        Mono<String> result = parallelHttpService.fetchData(url, Map.of("cookies", cookies));
+        mockMvc.perform(post("/startJob")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody))
+                .andExpect(status().isInternalServerError());
 
-        StepVerifier.create(result)
-                .expectNext("")
-                .verifyComplete();
-    }
-
-    // ✅ 4. Missing Cookies in ExecutionContext
-    @Test
-    void fetchData_shouldHandleMissingCookies() {
-        String url = "http://example.com";
-
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("Success"));
-
-        Mono<String> result = parallelHttpService.fetchData(url, Collections.emptyMap());
-
-        StepVerifier.create(result)
-                .expectNext("Success")
-                .verifyComplete();
-    }
-
-    // ✅ 5. Invalid URL Format Handling
-    @Test
-    void fetchData_shouldHandleInvalidUrl() {
-        String url = "invalid-url";
-        List<String> cookies = List.of("cookie1");
-
-        when(responseSpec.bodyToMono(String.class))
-                .thenReturn(Mono.error(new IllegalArgumentException("Invalid URL")));
-
-        Mono<String> result = parallelHttpService.fetchData(url, Map.of("cookies", cookies));
-
-        StepVerifier.create(result)
-                .expectNextMatches(response -> response.contains("Invalid URL"))
-                .verifyComplete();
-    }
-
-    // ✅ 6. Timeout Handling
-    @Test
-    void fetchData_shouldHandleTimeouts() {
-        String url = "http://slow-server.com";
-        List<String> cookies = List.of("cookie1");
-
-        when(responseSpec.bodyToMono(String.class))
-                .thenReturn(Mono.error(new RuntimeException("Timeout")));
-
-        Mono<String> result = parallelHttpService.fetchData(url, Map.of("cookies", cookies));
-
-        StepVerifier.create(result)
-                .expectNextMatches(response -> response.contains("Timeout"))
-                .verifyComplete();
-    }
-
-    // ✅ 7. Null or Empty URL List in Parallel Fetch
-    @Test
-    void fetchDataInParallel_shouldHandleEmptyUrlList() {
-        List<String> urls = Collections.emptyList();
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.put("cookies", List.of("cookie1"));
-
-        List<String> result = parallelHttpService.fetchDataInParallel(urls, executionContext);
-
-        assert result.isEmpty();
-    }
-
-    // ✅ 8. Parallel Execution with Multiple URLs
-    @Test
-    void fetchDataInParallel_shouldFetchMultipleUrlsConcurrently() {
-        List<String> urls = List.of("http://example.com/1", "http://example.com/2");
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.put("cookies", List.of("cookie1"));
-
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("Success"));
-
-        List<String> result = parallelHttpService.fetchDataInParallel(urls, executionContext);
-
-        verify(webClient, times(2)).get();
-        verify(requestHeadersUriSpec, times(2)).uri(any(String.class));
-
-        assert result.size() == 2;
-        assert result.contains("Success");
-    }
-
-    // ✅ 9. Exception Handling for Unexpected Errors
-    @Test
-    void fetchData_shouldHandleUnexpectedErrors() {
-        String url = "http://example.com";
-        List<String> cookies = List.of("cookie1");
-
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.error(new RuntimeException("Unexpected error")));
-
-        Mono<String> result = parallelHttpService.fetchData(url, Map.of("cookies", cookies));
-
-        StepVerifier.create(result)
-                .expectNextMatches(response -> response.contains("Unexpected error"))
-                .verifyComplete();
+        verify(lockManager).tryLock();
+        verify(lockManager, never()).unlock();
     }
 }
