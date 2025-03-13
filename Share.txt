@@ -1,49 +1,14 @@
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.util.retry.Retry;
-
-import java.time.Duration;
-import java.util.List;
-
-public class MorningstarLoginWorker {
-
-    public static List<String> getCookies(WebClient webClient, String endpoint, String username, String password) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBasicAuth(username, password);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-
-        try {
-            return webClient.get()
-                .uri(endpoint)
-                .headers(httpHeaders -> httpHeaders.addAll(headers))
-                .retrieve()
-                .toBodilessEntity()
-                .map(response -> response.getHeaders().get(HttpHeaders.SET_COOKIE))
-                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))) // Retry once after 2 seconds
-                .block();
-        } catch (WebClientResponseException e) {
-            System.err.println("Failed to connect to MorningStar Server, Error: " + e.getMessage());
-        }
-        return null;
-    }
-}
-
-
-===========
-
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class ParallelFetcher {
     private final WebClient webClient;
-    private final AtomicBoolean authRefreshed = new AtomicBoolean(false);
+    private final AtomicReference<Mono<Void>> authRefreshMono = new AtomicReference<>(Mono.empty());
 
     public ParallelFetcher(WebClient webClient) {
         this.webClient = webClient;
@@ -51,9 +16,9 @@ public class ParallelFetcher {
 
     public List<String> fetchDataInParallel(List<String> urls) {
         return Flux.fromIterable(urls)
-                .flatMap(this::fetchData, 10) // Parallel execution
+                .flatMap(this::fetchData, 10) // Limit concurrency
                 .collectList()
-                .block(); // Blocking call to return List
+                .block();
     }
 
     private Mono<String> fetchData(String url) {
@@ -62,7 +27,7 @@ public class ParallelFetcher {
                     if (response.statusCode().is2xxSuccessful()) {
                         return response.bodyToMono(String.class);
                     } else if (isAuthError(response)) {
-                        return handleAuthError(url);
+                        return retryAfterAuthRefresh(url);
                     } else {
                         return Mono.just("Error fetching: " + url + " - " + response.statusCode());
                     }
@@ -80,24 +45,31 @@ public class ParallelFetcher {
     }
 
     private boolean isAuthError(ClientResponse response) {
-        return response.statusCode().value() == 401 || response.statusCode().value() == 403;
+        int status = response.statusCode().value();
+        return status == 401 || status == 403;
     }
 
-    private Mono<String> handleAuthError(String url) {
-        if (authRefreshed.compareAndSet(false, true)) {
-            return refreshAuthCookies()
-                    .then(makeRequest(url))
-                    .flatMap(response -> response.bodyToMono(String.class))
-                    .doFinally(signalType -> authRefreshed.set(false));
-        } else {
-            return Mono.just("Authentication error fetching: " + url);
-        }
+    private Mono<String> retryAfterAuthRefresh(String url) {
+        return getOrTriggerAuthRefresh()
+                .then(makeRequest(url))
+                .flatMap(response -> response.bodyToMono(String.class));
+    }
+
+    private Mono<Void> getOrTriggerAuthRefresh() {
+        return authRefreshMono.updateAndGet(existingMono -> {
+            if (existingMono == Mono.empty()) {
+                return refreshAuthCookies().cache(); // Cache ensures all waiting requests use the same Mono
+            }
+            return existingMono;
+        });
     }
 
     private Mono<Void> refreshAuthCookies() {
         return Mono.fromRunnable(() -> {
             System.out.println("Refreshing authentication cookies...");
-            // Your logic to refresh cookies
-        }).then();
+            // Actual logic to refresh cookies
+        })
+        .then()
+        .doFinally(signal -> authRefreshMono.set(Mono.empty())); // Reset after refresh
     }
 }
