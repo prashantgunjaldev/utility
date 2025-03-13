@@ -1,91 +1,65 @@
-package com.ubs.cumulus.parsingService.xml.morningstar.api;
+package com.ubs.cumulus.parsingService.xml.morningstar.batch;
 
-import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.mockito.Mockito.*;
 
-import com.ubs.cumulus.parsingService.xml.morningstar.service.MorningStarCreateEvents;
-import com.ubs.cumulus.parsingService.xml.morningstar.util.LockManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.security.core.Authentication;
-import javax.servlet.http.HttpServletRequest;
+import javax.xml.stream.XMLStreamException;
+import java.io.IOException;
+import java.util.*;
 
 @ExtendWith(MockitoExtension.class)
-class MorningStarTriggerControllerTest {
-
-    private MockMvc mockMvc;
-
-    @Mock
-    private MorningStarCreateEvents morningStarCreateEvents;
-
-    @Mock
-    private LockManager lockManager;
-
-    @Mock
-    private Authentication authentication;
-
-    @Mock
-    private HttpServletRequest request;
+class GetUniverseItemReaderTest {
 
     @InjectMocks
-    private MorningStarTriggerController controller;
+    private GetUniverseItemReader getUniverseItemReader;
+
+    @Mock
+    private StaxEventItemReader<FundShareClassList.ShareClass> staxEventItemReader;
+
+    private List<FundShareClassList.ShareClass> mockShareClasses;
 
     @BeforeEach
     void setup() {
-        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        mockShareClasses = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            mockShareClasses.add(new FundShareClassList.ShareClass());
+        }
     }
 
     @Test
-    void testStartJob_WhenLockIsAcquired_ShouldReturnSuccess() throws Exception {
-        when(lockManager.tryLock()).thenReturn(true);
+    void testDoRead_ReturnsBatchOf15() throws XMLStreamException, IOException {
+        // Mock the superclass method call
+        when(staxEventItemReader.read()).thenReturn(mockShareClasses);
 
-        String requestBody = "{ \"process_id\": \"12345\" }";
+        // Read first batch
+        List<FundShareClassList.ShareClass> batch1 = getUniverseItemReader.doRead();
 
-        mockMvc.perform(post("/startJob")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(requestBody))
-                .andExpect(status().isOk());
+        assertNotNull(batch1);
+        assertEquals(15, batch1.size());
 
-        verify(lockManager).tryLock();
-        verify(lockManager).unlock();
+        // Read second batch
+        List<FundShareClassList.ShareClass> batch2 = getUniverseItemReader.doRead();
+
+        assertNotNull(batch2);
+        assertEquals(5, batch2.size());
+
+        // Read third batch (should return null)
+        List<FundShareClassList.ShareClass> batch3 = getUniverseItemReader.doRead();
+        assertNull(batch3);
     }
 
     @Test
-    void testStartJob_WhenLockIsNotAcquired_ShouldReturnTooManyRequests() throws Exception {
-        when(lockManager.tryLock()).thenReturn(false);
+    void testDoRead_WhenNoData_ShouldReturnNull() throws XMLStreamException, IOException {
+        when(staxEventItemReader.read()).thenReturn(Collections.emptyList());
 
-        String requestBody = "{ \"process_id\": \"12345\" }";
+        List<FundShareClassList.ShareClass> result = getUniverseItemReader.doRead();
 
-        mockMvc.perform(post("/startJob")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(requestBody))
-                .andExpect(status().isTooManyRequests());
-
-        verify(lockManager).tryLock();
-        verify(lockManager, never()).unlock();
-    }
-
-    @Test
-    void testStartJob_WhenExceptionOccurs_ShouldReturnInternalServerError() throws Exception {
-        when(lockManager.tryLock()).thenThrow(new RuntimeException("Test Exception"));
-
-        String requestBody = "{ \"process_id\": \"12345\" }";
-
-        mockMvc.perform(post("/startJob")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(requestBody))
-                .andExpect(status().isInternalServerError());
-
-        verify(lockManager).tryLock();
-        verify(lockManager, never()).unlock();
+        assertNull(result);
     }
 }
