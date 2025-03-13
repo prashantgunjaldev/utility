@@ -1,89 +1,26 @@
-import reactor.core.publisher.Mono;
-import reactor.core.publisher.Flux;
-import reactor.util.retry.Retry;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.ClientResponse;
-import java.time.Duration;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
+public List<String> fetchDataInParallel(List<String> urls) {
+    return Flux.fromIterable(urls)
+            .flatMap(this::fetchDataWithRetry, 10) // Run max 10 requests in parallel
+            .collectList()
+            .block();
+}
 
-public class ParallelFetcher {
-    private final WebClient webClient;
-    private final AtomicReference<Mono<Void>> authRefreshMono = new AtomicReference<>(Mono.empty());
+private Mono<String> fetchDataWithRetry(String url) {
+    return fetchData(url)
+            .flatMap(response -> {
+                if (response.contains("401") || response.contains("403")) {
+                    return refreshAuthCookies().then(fetchData(url)); // Refresh auth and retry
+                }
+                return Mono.just(response);
+            })
+            .retryWhen(Retry.backoff(3, Duration.ofMillis(500)))
+            .onErrorResume(e -> Mono.just("Error fetching: " + url + " - " + e.getMessage()));
+}
 
-    public ParallelFetcher(WebClient webClient) {
-        this.webClient = webClient;
-    }
-
-    public List<String> fetchDataInParallel(List<String> urls) {
-        return Flux.fromIterable(urls)
-                .flatMap(this::fetchDataWithRetry, 10) // Limit concurrency
-                .collectList()
-                .block();
-    }
-
-    private Mono<String> fetchDataWithRetry(String url) {
-        return fetchData(url)
-                .retryWhen(
-                    Retry.backoff(3, Duration.ofMillis(500))
-                         .maxBackoff(Duration.ofSeconds(2))
-                         .filter(this::isTransientError) // Retry for all errors
-                );
-    }
-
-    private Mono<String> fetchData(String url) {
-        return makeRequest(url)
-                .flatMap(response -> {
-                    if (response.statusCode().is2xxSuccessful()) {
-                        return response.bodyToMono(String.class);
-                    } else if (isAuthError(response)) {
-                        return retryAfterAuthRefresh(url);
-                    } else {
-                        return Mono.just("Error fetching: " + url + " - " + response.statusCode());
-                    }
-                })
-                .timeout(Duration.ofSeconds(15))
-                .onErrorResume(e -> Mono.just("Error fetching: " + url + " - " + e.getMessage()));
-    }
-
-    private Mono<ClientResponse> makeRequest(String url) {
-        return webClient.get()
-                .uri(url)
-                .retrieve()
-                .toBodilessEntity()
-                .flatMap(response -> Mono.just(ClientResponse.create(response.getStatusCode()).build()));
-    }
-
-    private boolean isAuthError(ClientResponse response) {
-        int status = response.statusCode().value();
-        return status == 401 || status == 403;
-    }
-
-    private boolean isTransientError(Throwable throwable) {
-        return !(throwable instanceof IllegalArgumentException); // Example: Customize based on error type
-    }
-
-    private Mono<String> retryAfterAuthRefresh(String url) {
-        return getOrTriggerAuthRefresh()
-                .then(makeRequest(url))
-                .flatMap(response -> response.bodyToMono(String.class));
-    }
-
-    private Mono<Void> getOrTriggerAuthRefresh() {
-        return authRefreshMono.updateAndGet(existingMono -> {
-            if (existingMono == Mono.empty()) {
-                return refreshAuthCookies().cache(); // Cache ensures all waiting requests use the same Mono
-            }
-            return existingMono;
-        });
-    }
-
-    private Mono<Void> refreshAuthCookies() {
-        return Mono.fromRunnable(() -> {
-            System.out.println("Refreshing authentication cookies...");
-            // Actual logic to refresh cookies
-        })
-        .then()
-        .doFinally(signal -> authRefreshMono.set(Mono.empty())); // Reset after refresh
-    }
+private Mono<String> fetchData(String url) {
+    return webClient.get()
+            .uri(url)
+            .retrieve()
+            .bodyToMono(String.class)
+            .timeout(Duration.ofSeconds(15));
 }
