@@ -1,53 +1,103 @@
-# Function to retrieve secrets from multiple Azure Key Vaults and save to a JSON file
-function Get-AKVSecrets {
-    param (
-        [string[]]$vaultNames,   # List of Azure Key Vault names
-        [string]$outputFile = "secrets.json"  # Output file name
-    )
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.util.retry.Retry;
 
-    # Initialize an array to store secrets
-    $allSecrets = @()
+import java.time.Duration;
+import java.util.List;
 
-    foreach ($vault in $vaultNames) {
-        Write-Host "Fetching secrets from Key Vault: $vault"
+public class MorningstarLoginWorker {
+
+    public static List<String> getCookies(WebClient webClient, String endpoint, String username, String password) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBasicAuth(username, password);
+        headers.setContentType(MediaType.APPLICATION_JSON);
 
         try {
-            # Get all secret names from the Key Vault
-            $secrets = az keyvault secret list --vault-name $vault --query "[].name" -o json | ConvertFrom-Json
-
-            foreach ($secretName in $secrets) {
-                try {
-                    # Retrieve the secret value
-                    $secretValue = az keyvault secret show --vault-name $vault --name $secretName --query "value" -o tsv
-
-                    # Create a JSON object
-                    $secretObject = @{
-                        createOrUpdate = "yes"
-                        comments       = $null
-                        name           = $secretName
-                        value          = $secretValue
-                    }
-
-                    # Store the secret object in the array
-                    $allSecrets += $secretObject
-                }
-                catch {
-                    Write-Warning "Failed to retrieve secret value for: $secretName in $vault"
-                }
-            }
+            return webClient.get()
+                .uri(endpoint)
+                .headers(httpHeaders -> httpHeaders.addAll(headers))
+                .retrieve()
+                .toBodilessEntity()
+                .map(response -> response.getHeaders().get(HttpHeaders.SET_COOKIE))
+                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))) // Retry once after 2 seconds
+                .block();
+        } catch (WebClientResponseException e) {
+            System.err.println("Failed to connect to MorningStar Server, Error: " + e.getMessage());
         }
-        catch {
-            Write-Warning "Failed to fetch secrets from Key Vault: $vault"
+        return null;
+    }
+}
+
+
+===========
+
+import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public class ParallelFetcher {
+    private final WebClient webClient;
+    private final AtomicBoolean authRefreshed = new AtomicBoolean(false);
+
+    public ParallelFetcher(WebClient webClient) {
+        this.webClient = webClient;
+    }
+
+    public List<String> fetchDataInParallel(List<String> urls) {
+        return Flux.fromIterable(urls)
+                .flatMap(this::fetchData, 10) // Parallel execution
+                .collectList()
+                .block(); // Blocking call to return List
+    }
+
+    private Mono<String> fetchData(String url) {
+        return makeRequest(url)
+                .flatMap(response -> {
+                    if (response.statusCode().is2xxSuccessful()) {
+                        return response.bodyToMono(String.class);
+                    } else if (isAuthError(response)) {
+                        return handleAuthError(url);
+                    } else {
+                        return Mono.just("Error fetching: " + url + " - " + response.statusCode());
+                    }
+                })
+                .timeout(Duration.ofSeconds(15))
+                .onErrorResume(e -> Mono.just("Error fetching: " + url));
+    }
+
+    private Mono<ClientResponse> makeRequest(String url) {
+        return webClient.get()
+                .uri(url)
+                .retrieve()
+                .toBodilessEntity()
+                .flatMap(response -> Mono.just(ClientResponse.create(response.getStatusCode()).build()));
+    }
+
+    private boolean isAuthError(ClientResponse response) {
+        return response.statusCode().value() == 401 || response.statusCode().value() == 403;
+    }
+
+    private Mono<String> handleAuthError(String url) {
+        if (authRefreshed.compareAndSet(false, true)) {
+            return refreshAuthCookies()
+                    .then(makeRequest(url))
+                    .flatMap(response -> response.bodyToMono(String.class))
+                    .doFinally(signalType -> authRefreshed.set(false));
+        } else {
+            return Mono.just("Authentication error fetching: " + url);
         }
     }
 
-    # Convert to JSON and save to a file
-    $jsonOutput = $allSecrets | ConvertTo-Json -Depth 3
-    $jsonOutput | Out-File -Encoding utf8 $outputFile
-
-    Write-Host "Secrets saved to $outputFile"
+    private Mono<Void> refreshAuthCookies() {
+        return Mono.fromRunnable(() -> {
+            System.out.println("Refreshing authentication cookies...");
+            // Your logic to refresh cookies
+        }).then();
+    }
 }
-
-# Example usage: Provide your Key Vault names
-$vaultNames = @("YourKeyVault1", "YourKeyVault2") # Replace with actual Key Vault names
-Get-AKVSecrets -vaultNames $vaultNames -outputFile "dev-akv-secrets-v2.json"
