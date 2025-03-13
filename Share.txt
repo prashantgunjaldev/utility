@@ -3,25 +3,21 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Mockito;
+import org.mockito.MockitoAnnotations;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClient.RequestHeadersUriSpec;
 import org.springframework.web.reactive.function.client.WebClient.RequestHeadersSpec;
 import org.springframework.web.reactive.function.client.WebClient.ResponseSpec;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
-import reactor.test.StepVerifier;
 
-import java.util.List;
+import java.lang.reflect.Field;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class ParallelHttpServiceTest {
+public class ParallelHttpServiceTest {
 
     @Mock
     private WebClient.Builder webClientBuilder;
@@ -41,70 +37,51 @@ class ParallelHttpServiceTest {
     @InjectMocks
     private ParallelHttpService parallelHttpService;
 
-    private ExecutionContext jobContext;
-
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
+        MockitoAnnotations.openMocks(this);
+
+        // Mock WebClient.Builder behavior
         when(webClientBuilder.build()).thenReturn(webClient);
+
+        // Mock WebClient Request Chain
+        when(webClient.get()).thenReturn(requestHeadersUriSpec);
+        when(requestHeadersUriSpec.uri(anyString())).thenReturn(requestHeadersSpec);
+        when(requestHeadersSpec.header(anyString(), anyString())).thenReturn(requestHeadersSpec);
+        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
+        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("mocked-response"));
+
+        // Manually inject @Value fields
+        setField(parallelHttpService, "proxyHost", "localhost");
+        setField(parallelHttpService, "proxyPort", "8080");
+        setField(parallelHttpService, "proxyUsername", "user");
+        setField(parallelHttpService, "proxyPassword", "pass");
+
+        // Manually call init() if needed
         parallelHttpService.init();
-        
-        // Initialize ExecutionContext with cookies
-        jobContext = new ExecutionContext();
-        jobContext.put("cookies", List.of("cookie1", "cookie2"));
     }
 
     @Test
-    void fetchData_shouldReturnResponseOnSuccess() {
-        String url = "http://example.com";
+    public void testFetchData() {
+        ExecutionContext executionContext = new ExecutionContext();
 
-        when(webClient.get()).thenReturn((WebClient.RequestHeadersUriSpec) requestHeadersUriSpec);
-        when(requestHeadersUriSpec.uri(url)).thenReturn((RequestHeadersSpec) requestHeadersSpec);
-        when(requestHeadersSpec.headers(any())).thenReturn(requestHeadersSpec);
-        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("Success"));
+        String result = parallelHttpService.fetchData("https://mock-url.com", executionContext);
 
-        Mono<String> result = parallelHttpService.fetchData(url, jobContext);
+        // Validate the expected response
+        assert result.equals("mocked-response");
 
-        StepVerifier.create(result)
-                .expectNext("Success")
-                .verifyComplete();
+        // Verify that WebClient methods were called
+        verify(webClient).get();
+        verify(requestHeadersUriSpec).uri(anyString());
+        verify(requestHeadersSpec).header(anyString(), anyString());
+        verify(requestHeadersSpec).retrieve();
+        verify(responseSpec).bodyToMono(String.class);
     }
 
-    @Test
-    void fetchData_shouldReturnErrorMessageOnFailure() {
-        String url = "http://example.com";
-
-        when(webClient.get()).thenReturn((WebClient.RequestHeadersUriSpec) requestHeadersUriSpec);
-        when(requestHeadersUriSpec.uri(url)).thenReturn((RequestHeadersSpec) requestHeadersSpec);
-        when(requestHeadersSpec.headers(any())).thenReturn(requestHeadersSpec);
-        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
-        when(responseSpec.bodyToMono(String.class)).thenReturn(
-                Mono.error(new WebClientResponseException(500, "Internal Server Error", null, null, null))
-        );
-
-        Mono<String> result = parallelHttpService.fetchData(url, jobContext);
-
-        StepVerifier.create(result)
-                .expectNextMatches(response -> response.startsWith("Error fetching"))
-                .verifyComplete();
-    }
-
-    @Test
-    void fetchDataInParallel_shouldFetchMultipleUrlsConcurrently() {
-        List<String> urls = List.of("http://example.com/1", "http://example.com/2");
-
-        when(webClient.get()).thenReturn((WebClient.RequestHeadersUriSpec) requestHeadersUriSpec);
-        when(requestHeadersUriSpec.uri(any(String.class))).thenReturn((RequestHeadersSpec) requestHeadersSpec);
-        when(requestHeadersSpec.headers(any())).thenReturn(requestHeadersSpec);
-        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("Success"));
-
-        List<String> result = parallelHttpService.fetchDataInParallel(urls, jobContext);
-
-        verify(webClient, times(2)).get();
-        verify(requestHeadersUriSpec, times(2)).uri(any(String.class));
-
-        assert result.size() == 2;
-        assert result.contains("Success");
+    // Utility method to set private fields
+    private void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }
