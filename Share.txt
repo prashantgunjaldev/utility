@@ -1,7 +1,11 @@
-package com.ubs.cumulus.parsingService.xml.morningstar.batch;
-
-import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+import java.util.Arrays;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -9,57 +13,102 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import javax.xml.stream.XMLStreamException;
-import java.io.IOException;
-import java.util.*;
+import org.springframework.batch.item.ExecutionContext;
 
 @ExtendWith(MockitoExtension.class)
-class GetUniverseItemReaderTest {
-
-    @InjectMocks
-    private GetUniverseItemReader getUniverseItemReader;
+class GetUniverseWriterTest {
 
     @Mock
-    private StaxEventItemReader<FundShareClassList.ShareClass> staxEventItemReader;
+    private MorningstarList morningstarList;
+    
+    @Mock
+    private ExecutionContext jobContext;
+    
+    @Mock
+    private MorningstarRequest request;
 
-    private List<FundShareClassList.ShareClass> mockShareClasses;
+    @InjectMocks
+    private GetUniverseWriter getUniverseWriter;
 
     @BeforeEach
-    void setup() {
-        mockShareClasses = new ArrayList<>();
-        for (int i = 0; i < 20; i++) {
-            mockShareClasses.add(new FundShareClassList.ShareClass());
-        }
+    void setUp() {
+        // Any initialization if needed
     }
 
     @Test
-    void testDoRead_ReturnsBatchOf15() throws XMLStreamException, IOException {
-        // Mock the superclass method call
-        when(staxEventItemReader.read()).thenReturn(mockShareClasses);
+    void testWrite_withValidChunks() {
+        // Arrange
+        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
+        XmlParsedValuesMap xmlParsedValuesMap2 = mock(XmlParsedValuesMap.class);
+        List<XmlParsedValuesMap> chunkList = Arrays.asList(xmlParsedValuesMap, xmlParsedValuesMap2);
 
-        // Read first batch
-        List<FundShareClassList.ShareClass> batch1 = getUniverseItemReader.doRead();
+        when(xmlParsedValuesMap.getFlattennedValuesMap()).thenReturn(Collections.emptyList());
+        when(xmlParsedValuesMap2.getFlattennedValuesMap()).thenReturn(Collections.emptyList());
 
-        assertNotNull(batch1);
-        assertEquals(15, batch1.size());
+        // Act
+        assertDoesNotThrow(() -> getUniverseWriter.write(Collections.singletonList(chunkList)));
 
-        // Read second batch
-        List<FundShareClassList.ShareClass> batch2 = getUniverseItemReader.doRead();
-
-        assertNotNull(batch2);
-        assertEquals(5, batch2.size());
-
-        // Read third batch (should return null)
-        List<FundShareClassList.ShareClass> batch3 = getUniverseItemReader.doRead();
-        assertNull(batch3);
+        // Assert
+        verify(morningstarList, times(2)).addStraightValues(anyList());
+        verify(morningstarList, times(2)).addListValues(any());
+        verify(morningstarList, times(2)).addBenchmarkListValues(any());
     }
 
     @Test
-    void testDoRead_WhenNoData_ShouldReturnNull() throws XMLStreamException, IOException {
-        when(staxEventItemReader.read()).thenReturn(Collections.emptyList());
+    void testWrite_withEmptyChunks() {
+        // Arrange
+        List<XmlParsedValuesMap> emptyChunkList = Collections.emptyList();
 
-        List<FundShareClassList.ShareClass> result = getUniverseItemReader.doRead();
+        // Act
+        assertDoesNotThrow(() -> getUniverseWriter.write(Collections.singletonList(emptyChunkList)));
 
-        assertNull(result);
+        // Assert
+        verifyNoInteractions(morningstarList);
+    }
+
+    @Test
+    void testInsertList_withValidData() {
+        // Arrange
+        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
+        Map<String, Object> listValuesMap = mock(Map.class);
+        Set<String> keys = Set.of("key1");
+
+        when(xmlParsedValuesMap.getListValuesMap()).thenReturn(listValuesMap);
+        when(listValuesMap.keySet()).thenReturn(keys);
+        when(listValuesMap.get("key1")).thenReturn(List.of(mock(XmlListValues.class)));
+
+        // Act
+        assertDoesNotThrow(() -> getUniverseWriter.insertList(xmlParsedValuesMap));
+
+        // Assert
+        verify(morningstarList, times(1)).addListValues(any(XmlListValues.class));
+    }
+
+    @Test
+    void testInsertBenchmarkList_withValidData() {
+        // Arrange
+        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
+        List<XmlBenchmarkValues> benchmarkValues = List.of(mock(XmlBenchmarkValues.class));
+
+        when(xmlParsedValuesMap.getXmlBenchmarkValuesList()).thenReturn(benchmarkValues);
+
+        // Act
+        assertDoesNotThrow(() -> getUniverseWriter.insertBenchmarkList(xmlParsedValuesMap));
+
+        // Assert
+        verify(morningstarList, times(1)).addBenchmarkListValues(any(XmlBenchmarkValues.class));
+    }
+
+    @Test
+    void testInsertAuditData() {
+        // Arrange
+        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
+
+        // Act
+        assertDoesNotThrow(() -> getUniverseWriter.insertAuditData(xmlParsedValuesMap));
+
+        // Assert
+        // Assuming it interacts with morningstarList internally
+        verifyNoMoreInteractions(morningstarList);
     }
 }
