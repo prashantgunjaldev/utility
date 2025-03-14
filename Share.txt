@@ -1,11 +1,10 @@
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.util.List;
+import java.text.SimpleDateFormat;
 import java.util.Collections;
-import java.util.Map;
-import java.util.Set;
-import java.util.Arrays;
+import java.util.Date;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,102 +12,99 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.scope.context.StepContext;
 import org.springframework.batch.item.ExecutionContext;
+import org.springframework.web.client.RestTemplate;
 
 @ExtendWith(MockitoExtension.class)
-class GetUniverseWriterTest {
-
-    @Mock
-    private MorningstarList morningstarList;
-    
-    @Mock
-    private ExecutionContext jobContext;
-    
-    @Mock
-    private MorningstarRequest request;
+class MorningstarGetUniverseTaskletTest {
 
     @InjectMocks
-    private GetUniverseWriter getUniverseWriter;
+    private MorningstarGetUniverseTasklet tasklet;
+
+    @Mock
+    private RestTemplate restTemplate;
+
+    @Mock
+    private MorningstarGetUniverseWorker morningstarGetUniverseWorker;
+
+    @Mock
+    private StepContribution stepContribution;
+
+    @Mock
+    private ChunkContext chunkContext;
+
+    @Mock
+    private StepContext stepContext;
+
+    @Mock
+    private StepExecution stepExecution;
+
+    @Mock
+    private JobExecution jobExecution;
+
+    @Mock
+    private ExecutionContext executionContext;
 
     @BeforeEach
     void setUp() {
-        // Any initialization if needed
+        tasklet.restTemplate = restTemplate;
+        tasklet.universeEndpoint = "http://example.com/api";
+        tasklet.clientId = "client123";
+        tasklet.filePath = "/tmp/data.csv";
     }
 
     @Test
-    void testWrite_withValidChunks() {
-        // Arrange
-        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
-        XmlParsedValuesMap xmlParsedValuesMap2 = mock(XmlParsedValuesMap.class);
-        List<XmlParsedValuesMap> chunkList = Arrays.asList(xmlParsedValuesMap, xmlParsedValuesMap2);
+    void testExecute_Success() throws Exception {
+        // Mock Execution Context
+        when(chunkContext.getStepContext()).thenReturn(stepContext);
+        when(stepContext.getStepExecution()).thenReturn(stepExecution);
+        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
 
-        when(xmlParsedValuesMap.getFlattennedValuesMap()).thenReturn(Collections.emptyList());
-        when(xmlParsedValuesMap2.getFlattennedValuesMap()).thenReturn(Collections.emptyList());
+        List<String> mockCookies = Collections.singletonList("cookie123");
+        when(executionContext.get("cookies")).thenReturn(mockCookies);
 
-        // Act
-        assertDoesNotThrow(() -> getUniverseWriter.write(Collections.singletonList(chunkList)));
+        // Mock Job Parameters
+        when(jobExecution.getJobParameters().getString("startDate")).thenReturn("2025-03-14");
 
-        // Assert
-        verify(morningstarList, times(2)).addStraightValues(anyList());
-        verify(morningstarList, times(2)).addListValues(any());
-        verify(morningstarList, times(2)).addBenchmarkListValues(any());
+        // Call execute method
+        tasklet.execute(stepContribution, chunkContext);
+
+        // Verify method calls
+        verify(morningstarGetUniverseWorker).setTemplate(restTemplate);
+        verify(morningstarGetUniverseWorker).setFilePath("/tmp/data.csv");
+        verify(morningstarGetUniverseWorker).setUniverseEndpoint("http://example.com/api");
+        verify(morningstarGetUniverseWorker).setClientId("client123");
+        verify(morningstarGetUniverseWorker).setStartDate("2025-03-14");
+        verify(morningstarGetUniverseWorker).execute(mockCookies);
     }
 
     @Test
-    void testWrite_withEmptyChunks() {
-        // Arrange
-        List<XmlParsedValuesMap> emptyChunkList = Collections.emptyList();
+    void testExecute_WithDefaultDate() throws Exception {
+        // Mock Execution Context
+        when(chunkContext.getStepContext()).thenReturn(stepContext);
+        when(stepContext.getStepExecution()).thenReturn(stepExecution);
+        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
 
-        // Act
-        assertDoesNotThrow(() -> getUniverseWriter.write(Collections.singletonList(emptyChunkList)));
+        List<String> mockCookies = Collections.singletonList("cookie123");
+        when(executionContext.get("cookies")).thenReturn(mockCookies);
 
-        // Assert
-        verifyNoInteractions(morningstarList);
-    }
+        // Mock Job Parameters (No startDate provided)
+        when(jobExecution.getJobParameters().getString("startDate")).thenReturn(null);
 
-    @Test
-    void testInsertList_withValidData() {
-        // Arrange
-        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
-        Map<String, Object> listValuesMap = mock(Map.class);
-        Set<String> keys = Set.of("key1");
+        // Generate expected date
+        String expectedDate = new SimpleDateFormat("yyyy-MM-dd").format(new Date());
 
-        when(xmlParsedValuesMap.getListValuesMap()).thenReturn(listValuesMap);
-        when(listValuesMap.keySet()).thenReturn(keys);
-        when(listValuesMap.get("key1")).thenReturn(List.of(mock(XmlListValues.class)));
+        // Call execute method
+        tasklet.execute(stepContribution, chunkContext);
 
-        // Act
-        assertDoesNotThrow(() -> getUniverseWriter.insertList(xmlParsedValuesMap));
-
-        // Assert
-        verify(morningstarList, times(1)).addListValues(any(XmlListValues.class));
-    }
-
-    @Test
-    void testInsertBenchmarkList_withValidData() {
-        // Arrange
-        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
-        List<XmlBenchmarkValues> benchmarkValues = List.of(mock(XmlBenchmarkValues.class));
-
-        when(xmlParsedValuesMap.getXmlBenchmarkValuesList()).thenReturn(benchmarkValues);
-
-        // Act
-        assertDoesNotThrow(() -> getUniverseWriter.insertBenchmarkList(xmlParsedValuesMap));
-
-        // Assert
-        verify(morningstarList, times(1)).addBenchmarkListValues(any(XmlBenchmarkValues.class));
-    }
-
-    @Test
-    void testInsertAuditData() {
-        // Arrange
-        XmlParsedValuesMap xmlParsedValuesMap = mock(XmlParsedValuesMap.class);
-
-        // Act
-        assertDoesNotThrow(() -> getUniverseWriter.insertAuditData(xmlParsedValuesMap));
-
-        // Assert
-        // Assuming it interacts with morningstarList internally
-        verifyNoMoreInteractions(morningstarList);
+        // Verify method calls
+        verify(morningstarGetUniverseWorker).setStartDate(expectedDate);
     }
 }
