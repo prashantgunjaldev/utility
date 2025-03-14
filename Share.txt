@@ -1,8 +1,7 @@
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,109 +9,62 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.scope.context.ChunkContext;
-import org.springframework.batch.core.scope.context.StepContext;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.web.client.RestTemplate;
 
 @ExtendWith(MockitoExtension.class)
-class MorningstarLoginTaskletTest {
+class GetUniverseXpathProcessorTest {
+
+    @Mock
+    private ParallelHttpService parallelHttpService;
+
+    @Mock
+    private XMLParserUtil xmlParserUtil;
+
+    @Mock
+    private MorningStarCreateEvents morningStarCreateEvents;
 
     @InjectMocks
-    private MorningstarLoginTasklet tasklet;
+    private GetUniverseXpathProcessor processor;
 
-    @Mock
-    private MorningstarLoginWorker loginWorker;
-
-    @Mock
-    private RestTemplate restTemplate;
-
-    @Mock
-    private XPathMappingRepository xPathMappingRepository;
-
-    @Mock
-    private StepContribution stepContribution;
-
-    @Mock
-    private ChunkContext chunkContext;
-
-    @Mock
-    private StepContext stepContext;
-
-    @Mock
-    private StepExecution stepExecution;
-
-    @Mock
-    private JobExecution jobExecution;
-
-    @Mock
-    private ExecutionContext executionContext;
+    private List<FundShareClassList.ShareClass> mockItems;
+    private List<String> mockXmlResponses;
 
     @BeforeEach
     void setUp() {
-        tasklet.restTemplate = restTemplate;
-        tasklet.xPathMappingRepository = xPathMappingRepository;
+        mockItems = List.of(
+            new FundShareClassList.ShareClass("ID1"),
+            new FundShareClassList.ShareClass("ID2")
+        );
+
+        mockXmlResponses = List.of("<xml>data1</xml>", "<xml>data2</xml>");
     }
 
     @Test
-    void testExecute_Success() throws Exception {
-        // Mock Execution Context
-        when(chunkContext.getStepContext()).thenReturn(stepContext);
-        when(stepContext.getStepExecution()).thenReturn(stepExecution);
-        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
-        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+    void testProcess_ShouldReturnParsedValues() throws Exception {
+        when(parallelHttpService.fetchDataInParallel(anyList(), any())).thenReturn(mockXmlResponses);
+        when(xmlParserUtil.parseXML(anyString())).thenReturn(new XmlParsedValuesMap());
 
-        // Mock cookies retrieval from login worker
-        List<String> mockCookies = Collections.singletonList("cookie123");
-        when(loginWorker.login()).thenReturn(mockCookies);
+        List<XmlParsedValuesMap> result = processor.process(mockItems);
 
-        // Mock feedId retrieval
-        when(jobExecution.getJobParameters().getString("feedId")).thenReturn("12345");
-
-        // Mock xPathMappings retrieval from repository
-        List<XPathMappingEntity> mockXPathMappings = Collections.singletonList(new XPathMappingEntity());
-        when(xPathMappingRepository.findByFeedId("12345")).thenReturn(mockXPathMappings);
-
-        // Call execute method
-        tasklet.execute(stepContribution, chunkContext);
-
-        // Verify method calls
-        verify(loginWorker).setRestTemplate(restTemplate);
-        verify(loginWorker).login();
-        verify(xPathMappingRepository).findByFeedId("12345");
-
-        // Verify execution context updates
-        verify(executionContext).put("cookies", mockCookies);
-        verify(executionContext).put("columns", mockXPathMappings);
+        assertNotNull(result);
+        assertEquals(2, result.size());
     }
 
     @Test
-    void testExecute_WithNoFeedId() throws Exception {
-        // Mock Execution Context
-        when(chunkContext.getStepContext()).thenReturn(stepContext);
-        when(stepContext.getStepExecution()).thenReturn(stepExecution);
-        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
-        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+    void testGetUrlList_ShouldReturnUrls() {
+        List<String> urls = processor.getUrlList(mockItems);
 
-        // Mock cookies retrieval from login worker
-        List<String> mockCookies = Collections.singletonList("cookie123");
-        when(loginWorker.login()).thenReturn(mockCookies);
+        assertNotNull(urls);
+        assertEquals(2, urls.size());
+        assertTrue(urls.get(0).contains("DataOutput.aspx"));
+    }
 
-        // Mock Job Parameters (No feedId provided)
-        when(jobExecution.getJobParameters().getString("feedId")).thenReturn(null);
+    @Test
+    void testGetParsedXMLValues_ShouldHandleErrorFetching() {
+        List<String> mockXmls = List.of("Error fetching XML", "<xml>validData</xml>");
 
-        // Call execute method
-        tasklet.execute(stepContribution, chunkContext);
+        List<XmlParsedValuesMap> result = processor.getParsedXMLValues(mockItems, mockXmls);
 
-        // Verify method calls
-        verify(loginWorker).setRestTemplate(restTemplate);
-        verify(loginWorker).login();
-
-        // Verify execution context updates
-        verify(executionContext).put("cookies", mockCookies);
-        verify(executionContext, never()).put(eq("columns"), any());
+        assertNotNull(result);
+        assertEquals(1, result.size()); // Only the valid XML should be processed
     }
 }
