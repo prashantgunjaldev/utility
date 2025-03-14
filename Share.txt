@@ -1,49 +1,112 @@
-package com.ubs.cumulus.parsingService.xml.morningstar.util;
+package com.ubs.cumulus.parsingService.xml.morningstar.listener;
 
-import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-import java.util.concurrent.locks.ReentrantLock;
+import java.sql.Connection;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.execution.context.ExecutionContext;
 
-class GlobalLockManagerTest {
+class JobResultListenerTest {
 
     @InjectMocks
-    private GlobalLockManager globalLockManager;
+    private JobResultListener jobResultListener;
 
     @Mock
-    private ReentrantLock lock;
+    private ConnectionGenerator databricksConnectionGenerator;
+
+    @Mock
+    private ConnectionGeneratorDataProvider dbConnectionGenerator;
+
+    @Mock
+    private MorningStarInsertValues morningStarInsertValues;
+
+    @Mock
+    private MorningStarCreateTables morningStarCreateTables;
+
+    @Mock
+    private JobExecution jobExecution;
+
+    @Mock
+    private ExecutionContext executionContext;
+
+    @Mock
+    private MorningStarDTO morningstarRequest;
+
+    @Mock
+    private MorningStarList morningStarList;
+
+    @Mock
+    private Connection dataBricksConnection;
+
+    @Mock
+    private Connection pgDbConnection;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.initMocks(this);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+        when(executionContext.get("request")).thenReturn(morningstarRequest);
+        when(executionContext.get("morningstarList")).thenReturn(morningStarList);
     }
 
     @Test
-    void testTryLock() {
-        when(lock.tryLock()).thenReturn(true);
-        assertTrue(globalLockManager.tryLock());
+    void testBeforeJob() {
+        JobParameters jobParameters = mock(JobParameters.class);
+        when(jobExecution.getJobParameters()).thenReturn(jobParameters);
+        when(jobParameters.getString(anyString())).thenReturn("testValue");
 
-        when(lock.tryLock()).thenReturn(false);
-        assertFalse(globalLockManager.tryLock());
+        jobResultListener.beforeJob(jobExecution);
+
+        verify(jobExecution.getExecutionContext(), times(1)).put(eq("request"), any(MorningStarDTO.class));
     }
 
     @Test
-    void testUnlock_WhenLockIsLocked() {
-        when(lock.isLocked()).thenReturn(true);
-        globalLockManager.unlock();
-        verify(lock, times(1)).unlock();
+    void testAfterJob_Completed() throws Exception {
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+        when(morningStarList.getXmlParsedValuesMapList()).thenReturn(mock(java.util.List.class));
+        when(morningStarList.getXmlParsedValues()).thenReturn(mock(java.util.List.class));
+
+        when(databricksConnectionGenerator.generate()).thenReturn(dataBricksConnection);
+        when(dbConnectionGenerator.getPgDbConnection()).thenReturn(pgDbConnection);
+
+        jobResultListener.afterJob(jobExecution);
+
+        verify(morningStarInsertValues, times(1)).insert(any(), any(), any());
+        verify(morningStarInsertValues, times(1)).insertList(any(), any(), any());
+        verify(morningStarInsertValues, times(1)).insertBenchmarkList(any(), any(), any());
+        verify(morningStarInsertValues, times(1)).insertAuditInfoList(any(), any(), any());
+        verify(databricksConnectionGenerator, times(1)).closeConnection(dataBricksConnection);
+        verify(dbConnectionGenerator, times(1)).closeConnection(pgDbConnection);
     }
 
     @Test
-    void testUnlock_WhenLockIsNotLocked() {
-        when(lock.isLocked()).thenReturn(false);
-        globalLockManager.unlock();
-        verify(lock, never()).unlock();
+    void testAfterJob_Failed() {
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
+
+        jobResultListener.afterJob(jobExecution);
+
+        verify(morningStarInsertValues, never()).insert(any(), any(), any());
+        verify(morningStarInsertValues, never()).insertList(any(), any(), any());
+        verify(morningStarInsertValues, never()).insertBenchmarkList(any(), any(), any());
+        verify(morningStarInsertValues, never()).insertAuditInfoList(any(), any(), any());
+    }
+
+    @Test
+    void testAfterJob_ExceptionHandling() throws Exception {
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+        when(databricksConnectionGenerator.generate()).thenThrow(new RuntimeException("DB Error"));
+
+        assertDoesNotThrow(() -> jobResultListener.afterJob(jobExecution));
+
+        verify(jobExecution, times(1)).setStatus(BatchStatus.FAILED);
     }
 }
