@@ -1,9 +1,7 @@
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.text.SimpleDateFormat;
 import java.util.Collections;
-import java.util.Date;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,16 +19,19 @@ import org.springframework.batch.item.ExecutionContext;
 import org.springframework.web.client.RestTemplate;
 
 @ExtendWith(MockitoExtension.class)
-class MorningstarGetUniverseTaskletTest {
+class MorningstarLoginTaskletTest {
 
     @InjectMocks
-    private MorningstarGetUniverseTasklet tasklet;
+    private MorningstarLoginTasklet tasklet;
+
+    @Mock
+    private MorningstarLoginWorker loginWorker;
 
     @Mock
     private RestTemplate restTemplate;
 
     @Mock
-    private MorningstarGetUniverseWorker morningstarGetUniverseWorker;
+    private XPathMappingRepository xPathMappingRepository;
 
     @Mock
     private StepContribution stepContribution;
@@ -53,9 +54,7 @@ class MorningstarGetUniverseTaskletTest {
     @BeforeEach
     void setUp() {
         tasklet.restTemplate = restTemplate;
-        tasklet.universeEndpoint = "http://example.com/api";
-        tasklet.clientId = "client123";
-        tasklet.filePath = "/tmp/data.csv";
+        tasklet.xPathMappingRepository = xPathMappingRepository;
     }
 
     @Test
@@ -66,45 +65,54 @@ class MorningstarGetUniverseTaskletTest {
         when(stepExecution.getJobExecution()).thenReturn(jobExecution);
         when(jobExecution.getExecutionContext()).thenReturn(executionContext);
 
+        // Mock cookies retrieval from login worker
         List<String> mockCookies = Collections.singletonList("cookie123");
-        when(executionContext.get("cookies")).thenReturn(mockCookies);
+        when(loginWorker.login()).thenReturn(mockCookies);
 
-        // Mock Job Parameters
-        when(jobExecution.getJobParameters().getString("startDate")).thenReturn("2025-03-14");
+        // Mock feedId retrieval
+        when(jobExecution.getJobParameters().getString("feedId")).thenReturn("12345");
+
+        // Mock xPathMappings retrieval from repository
+        List<XPathMappingEntity> mockXPathMappings = Collections.singletonList(new XPathMappingEntity());
+        when(xPathMappingRepository.findByFeedId("12345")).thenReturn(mockXPathMappings);
 
         // Call execute method
         tasklet.execute(stepContribution, chunkContext);
 
         // Verify method calls
-        verify(morningstarGetUniverseWorker).setTemplate(restTemplate);
-        verify(morningstarGetUniverseWorker).setFilePath("/tmp/data.csv");
-        verify(morningstarGetUniverseWorker).setUniverseEndpoint("http://example.com/api");
-        verify(morningstarGetUniverseWorker).setClientId("client123");
-        verify(morningstarGetUniverseWorker).setStartDate("2025-03-14");
-        verify(morningstarGetUniverseWorker).execute(mockCookies);
+        verify(loginWorker).setRestTemplate(restTemplate);
+        verify(loginWorker).login();
+        verify(xPathMappingRepository).findByFeedId("12345");
+
+        // Verify execution context updates
+        verify(executionContext).put("cookies", mockCookies);
+        verify(executionContext).put("columns", mockXPathMappings);
     }
 
     @Test
-    void testExecute_WithDefaultDate() throws Exception {
+    void testExecute_WithNoFeedId() throws Exception {
         // Mock Execution Context
         when(chunkContext.getStepContext()).thenReturn(stepContext);
         when(stepContext.getStepExecution()).thenReturn(stepExecution);
         when(stepExecution.getJobExecution()).thenReturn(jobExecution);
         when(jobExecution.getExecutionContext()).thenReturn(executionContext);
 
+        // Mock cookies retrieval from login worker
         List<String> mockCookies = Collections.singletonList("cookie123");
-        when(executionContext.get("cookies")).thenReturn(mockCookies);
+        when(loginWorker.login()).thenReturn(mockCookies);
 
-        // Mock Job Parameters (No startDate provided)
-        when(jobExecution.getJobParameters().getString("startDate")).thenReturn(null);
-
-        // Generate expected date
-        String expectedDate = new SimpleDateFormat("yyyy-MM-dd").format(new Date());
+        // Mock Job Parameters (No feedId provided)
+        when(jobExecution.getJobParameters().getString("feedId")).thenReturn(null);
 
         // Call execute method
         tasklet.execute(stepContribution, chunkContext);
 
         // Verify method calls
-        verify(morningstarGetUniverseWorker).setStartDate(expectedDate);
+        verify(loginWorker).setRestTemplate(restTemplate);
+        verify(loginWorker).login();
+
+        // Verify execution context updates
+        verify(executionContext).put("cookies", mockCookies);
+        verify(executionContext, never()).put(eq("columns"), any());
     }
 }
