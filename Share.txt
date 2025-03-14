@@ -1,112 +1,33 @@
-package com.ubs.cumulus.parsingService.xml.morningstar.listener;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
+import java.time.Duration;
+import java.util.List;
 
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
+public List<String> fetchDataInParallel(List<String> urls, ExecutionContext jobContext) {
+    List<String> cookies = (List<String>) jobContext.get("cookies");
 
-import java.sql.Connection;
+    return Flux.fromIterable(urls)
+            .flatMap(url -> fetchData(url, cookies), 25) // Limit concurrency to 25
+            .collectList()
+            .block(); // Convert Flux to List (blocking)
+}
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.JobParameters;
-import org.springframework.batch.core.execution.context.ExecutionContext;
+private Mono<String> fetchData(String url, List<String> cookies) {
+    log.info("Fetching -> {}", url);
 
-class JobResultListenerTest {
-
-    @InjectMocks
-    private JobResultListener jobResultListener;
-
-    @Mock
-    private ConnectionGenerator databricksConnectionGenerator;
-
-    @Mock
-    private ConnectionGeneratorDataProvider dbConnectionGenerator;
-
-    @Mock
-    private MorningStarInsertValues morningStarInsertValues;
-
-    @Mock
-    private MorningStarCreateTables morningStarCreateTables;
-
-    @Mock
-    private JobExecution jobExecution;
-
-    @Mock
-    private ExecutionContext executionContext;
-
-    @Mock
-    private MorningStarDTO morningstarRequest;
-
-    @Mock
-    private MorningStarList morningStarList;
-
-    @Mock
-    private Connection dataBricksConnection;
-
-    @Mock
-    private Connection pgDbConnection;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.initMocks(this);
-        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
-        when(executionContext.get("request")).thenReturn(morningstarRequest);
-        when(executionContext.get("morningstarList")).thenReturn(morningStarList);
-    }
-
-    @Test
-    void testBeforeJob() {
-        JobParameters jobParameters = mock(JobParameters.class);
-        when(jobExecution.getJobParameters()).thenReturn(jobParameters);
-        when(jobParameters.getString(anyString())).thenReturn("testValue");
-
-        jobResultListener.beforeJob(jobExecution);
-
-        verify(jobExecution.getExecutionContext(), times(1)).put(eq("request"), any(MorningStarDTO.class));
-    }
-
-    @Test
-    void testAfterJob_Completed() throws Exception {
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
-        when(morningStarList.getXmlParsedValuesMapList()).thenReturn(mock(java.util.List.class));
-        when(morningStarList.getXmlParsedValues()).thenReturn(mock(java.util.List.class));
-
-        when(databricksConnectionGenerator.generate()).thenReturn(dataBricksConnection);
-        when(dbConnectionGenerator.getPgDbConnection()).thenReturn(pgDbConnection);
-
-        jobResultListener.afterJob(jobExecution);
-
-        verify(morningStarInsertValues, times(1)).insert(any(), any(), any());
-        verify(morningStarInsertValues, times(1)).insertList(any(), any(), any());
-        verify(morningStarInsertValues, times(1)).insertBenchmarkList(any(), any(), any());
-        verify(morningStarInsertValues, times(1)).insertAuditInfoList(any(), any(), any());
-        verify(databricksConnectionGenerator, times(1)).closeConnection(dataBricksConnection);
-        verify(dbConnectionGenerator, times(1)).closeConnection(pgDbConnection);
-    }
-
-    @Test
-    void testAfterJob_Failed() {
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
-
-        jobResultListener.afterJob(jobExecution);
-
-        verify(morningStarInsertValues, never()).insert(any(), any(), any());
-        verify(morningStarInsertValues, never()).insertList(any(), any(), any());
-        verify(morningStarInsertValues, never()).insertBenchmarkList(any(), any(), any());
-        verify(morningStarInsertValues, never()).insertAuditInfoList(any(), any(), any());
-    }
-
-    @Test
-    void testAfterJob_ExceptionHandling() throws Exception {
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
-        when(databricksConnectionGenerator.generate()).thenThrow(new RuntimeException("DB Error"));
-
-        assertDoesNotThrow(() -> jobResultListener.afterJob(jobExecution));
-
-        verify(jobExecution, times(1)).setStatus(BatchStatus.FAILED);
-    }
+    return webClient.get()
+            .uri(url)
+            .headers(headers -> {
+                cookies.forEach(cookie -> headers.add("Cookie", cookie));
+            })
+            .retrieve()
+            .bodyToMono(String.class)
+            .timeout(Duration.ofSeconds(30))
+            .retryWhen(Retry.backoff(2, Duration.ofMillis(1000)) // Retry twice with 1s backoff
+                    .doBeforeRetry(retrySignal -> 
+                        log.warn("Retrying API call to {} - Attempt {}", url, retrySignal.totalRetries()))
+            )
+            .doOnError(e -> log.error("Final failure for URL {}: {}", url, e.getMessage()))
+            .onErrorResume(e -> Mono.just("Error fetching: " + url + " Error: " + e.getMessage()));
 }
