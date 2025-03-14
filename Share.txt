@@ -1,70 +1,49 @@
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
+package com.ubs.cumulus.parsingService.xml.morningstar.util;
 
-import java.util.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.MockitoAnnotations;
 
-@ExtendWith(MockitoExtension.class)
-class GetUniverseXpathProcessorTest {
-
-    @Mock
-    private ParallelHttpService parallelHttpService;
-
-    @Mock
-    private XMLParserUtil xmlParserUtil;
-
-    @Mock
-    private MorningStarCreateEvents morningStarCreateEvents;
+class GlobalLockManagerTest {
 
     @InjectMocks
-    private GetUniverseXpathProcessor processor;
+    private GlobalLockManager globalLockManager;
 
-    private List<FundShareClassList.ShareClass> mockItems;
-    private List<String> mockXmlResponses;
+    @Mock
+    private ReentrantLock lock;
 
     @BeforeEach
     void setUp() {
-        mockItems = List.of(
-            new FundShareClassList.ShareClass("ID1"),
-            new FundShareClassList.ShareClass("ID2")
-        );
-
-        mockXmlResponses = List.of("<xml>data1</xml>", "<xml>data2</xml>");
+        MockitoAnnotations.initMocks(this);
     }
 
     @Test
-    void testProcess_ShouldReturnParsedValues() throws Exception {
-        when(parallelHttpService.fetchDataInParallel(anyList(), any())).thenReturn(mockXmlResponses);
-        when(xmlParserUtil.parseXML(anyString())).thenReturn(new XmlParsedValuesMap());
+    void testTryLock() {
+        when(lock.tryLock()).thenReturn(true);
+        assertTrue(globalLockManager.tryLock());
 
-        List<XmlParsedValuesMap> result = processor.process(mockItems);
-
-        assertNotNull(result);
-        assertEquals(2, result.size());
+        when(lock.tryLock()).thenReturn(false);
+        assertFalse(globalLockManager.tryLock());
     }
 
     @Test
-    void testGetUrlList_ShouldReturnUrls() {
-        List<String> urls = processor.getUrlList(mockItems);
-
-        assertNotNull(urls);
-        assertEquals(2, urls.size());
-        assertTrue(urls.get(0).contains("DataOutput.aspx"));
+    void testUnlock_WhenLockIsLocked() {
+        when(lock.isLocked()).thenReturn(true);
+        globalLockManager.unlock();
+        verify(lock, times(1)).unlock();
     }
 
     @Test
-    void testGetParsedXMLValues_ShouldHandleErrorFetching() {
-        List<String> mockXmls = List.of("Error fetching XML", "<xml>validData</xml>");
-
-        List<XmlParsedValuesMap> result = processor.getParsedXMLValues(mockItems, mockXmls);
-
-        assertNotNull(result);
-        assertEquals(1, result.size()); // Only the valid XML should be processed
+    void testUnlock_WhenLockIsNotLocked() {
+        when(lock.isLocked()).thenReturn(false);
+        globalLockManager.unlock();
+        verify(lock, never()).unlock();
     }
 }
