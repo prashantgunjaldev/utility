@@ -1,6 +1,8 @@
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.lang.reflect.Field;
+
 import org.json.JSONObject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -9,11 +11,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,45 +24,46 @@ class AccessTokenGeneratorTest {
     @InjectMocks
     private AccessTokenGenerator accessTokenGenerator;
 
-    private String tokenGeneratorUri = "http://mock-api/token";
-    private String mockResponse = "{\"access_token\": \"mocked-token\"}";
+    private final String tokenGeneratorUri = "http://mock-api/token";
+    private final String clientId = "mock-client-id";
+    private final String clientSecret = "mock-client-secret";
+    private final String scope = "mock-scope";
+    private final String mockResponse = "{\"access_token\": \"mocked-token\"}";
 
     @BeforeEach
-    void setUp() {
-        // Set the token generator URI using reflection
-        accessTokenGenerator = new AccessTokenGenerator();
-        accessTokenGenerator.tokenGeneratorUri = tokenGeneratorUri;
-        accessTokenGenerator.template = restTemplate;
+    void setUp() throws Exception {
+        setPrivateField(accessTokenGenerator, "tokenGeneratorUri", tokenGeneratorUri);
+        setPrivateField(accessTokenGenerator, "spClientId", clientId);
+        setPrivateField(accessTokenGenerator, "spKey", clientSecret);
+        setPrivateField(accessTokenGenerator, "scope", scope);
+    }
+
+    private void setPrivateField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     @Test
     void testGenerateToken_Success() throws Exception {
-        // Mocking the response from the API
         ResponseEntity<String> responseEntity = new ResponseEntity<>(mockResponse, HttpStatus.OK);
         when(restTemplate.postForEntity(eq(tokenGeneratorUri), any(HttpEntity.class), eq(String.class)))
                 .thenReturn(responseEntity);
 
-        // Calling the method under test
         String accessToken = accessTokenGenerator.generateToken();
 
-        // Assertions
         assertNotNull(accessToken);
         assertEquals("mocked-token", accessToken);
 
-        // Verify that postForEntity was called once
         verify(restTemplate, times(1)).postForEntity(eq(tokenGeneratorUri), any(HttpEntity.class), eq(String.class));
     }
 
     @Test
     void testGenerateToken_ThrowsException() {
-        // Mocking an error response
         when(restTemplate.postForEntity(eq(tokenGeneratorUri), any(HttpEntity.class), eq(String.class)))
                 .thenThrow(new RuntimeException("API call failed"));
 
-        // Expecting an exception
-        Exception exception = assertThrows(RuntimeException.class, () -> {
-            accessTokenGenerator.generateToken();
-        });
+        Exception exception = assertThrows(RuntimeException.class, () -> accessTokenGenerator.generateToken());
 
         assertEquals("API call failed", exception.getMessage());
     }
