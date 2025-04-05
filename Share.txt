@@ -1,21 +1,63 @@
-private void setField(Object target, String fieldName, Object value) {
-    try {
-        var field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.set(target, value);
-    } catch (Exception e) {
-        throw new RuntimeException(e);
+@ExtendWith(MockitoExtension.class)
+class UserTokenGeneratorServiceTest {
+
+    private UserTokenGeneratorService userTokenGeneratorService;
+
+    @BeforeEach
+    void setUp() {
+        userTokenGeneratorService = new UserTokenGeneratorService();
+        setField(userTokenGeneratorService, "clientId", "dummy-client-id");
+        setField(userTokenGeneratorService, "clientSecret", "dummy-client-secret");
+        setField(userTokenGeneratorService, "tenantId", "dummy-tenant-id");
+        setField(userTokenGeneratorService, "scope", "dummy-scope/.default");
+    }
+
+    @Test
+    void testGenerateTokenSuccess() throws Exception {
+        Token mockToken = new Token();
+
+        // Mocks
+        IAuthenticationResult mockAuthResult = mock(IAuthenticationResult.class);
+        when(mockAuthResult.accessToken()).thenReturn("mock-access-token");
+        when(mockAuthResult.expiresOnDate()).thenReturn(Date.from(Instant.now().plusSeconds(3600)));
+
+        CompletableFuture<IAuthenticationResult> mockFuture = mock(CompletableFuture.class);
+        when(mockFuture.get()).thenReturn(mockAuthResult);
+
+        ConfidentialClientApplication mockApp = mock(ConfidentialClientApplication.class);
+        when(mockApp.acquireToken(any())).thenReturn(mockFuture);
+
+        // Static mocking
+        try (MockedStatic<ConfidentialClientApplication> staticMock = Mockito.mockStatic(ConfidentialClientApplication.class)) {
+            ConfidentialClientApplication.Builder mockBuilder = mock(ConfidentialClientApplication.Builder.class);
+
+            staticMock.when(() -> ConfidentialClientApplication.builder(eq("dummy-client-id"), any()))
+                      .thenReturn(mockBuilder);
+
+            when(mockBuilder.authority(anyString())).thenReturn(mockBuilder);
+            when(mockBuilder.build()).thenReturn(mockApp);
+
+            Token result = userTokenGeneratorService.generateToken(mockToken);
+
+            assertNotNull(result.getAccessToken());
+            assertEquals("mock-access-token", result.getAccessToken());
+        }
+    }
+
+    private void setField(Object target, String fieldName, Object value) {
+        try {
+            Field field = target.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(target, value);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }
 
-@BeforeEach
-void setUp() throws MalformedURLException {
-    MockitoAnnotations.openMocks(this);
-    userTokenGeneratorService = new UserTokenGeneratorService();
-
-    // Inject required values
-    setField(userTokenGeneratorService, "clientId", "dummy-client-id");
-    setField(userTokenGeneratorService, "clientSecret", "dummy-secret");
-    setField(userTokenGeneratorService, "tenantId", "dummy-tenant");
-    setField(userTokenGeneratorService, "scope", "dummy-scope/.default");
-}
+<dependency>
+    <groupId>org.mockito</groupId>
+    <artifactId>mockito-inline</artifactId>
+    <version>4.11.0</version>
+    <scope>test</scope>
+</dependency>
