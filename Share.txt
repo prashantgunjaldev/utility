@@ -1,75 +1,21 @@
-import com.microsoft.aad.msal4j.*;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-
-import java.net.MalformedURLException;
-import java.time.Instant;
-import java.util.Collections;
-import java.util.concurrent.CompletableFuture;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-
-class UserTokenGeneratorServiceTest {
-
-    @InjectMocks
-    private UserTokenGeneratorService userTokenGeneratorService;
-
-    @Mock
-    private ConfidentialClientApplication confidentialClientApplication;
-
-    @Mock
-    private IAuthenticationResult authenticationResult;
-
-    @Mock
-    private CompletableFuture<IAuthenticationResult> future;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-
-        // Inject the mock application creation (reflection-based or via setter in real-world use)
+private void setField(Object target, String fieldName, Object value) {
+    try {
+        var field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
+    } catch (Exception e) {
+        throw new RuntimeException(e);
     }
+}
 
-    @Test
-    void testGenerateTokenSuccess() throws Exception {
-        // Arrange
-        Token token = new Token();  // assuming a simple POJO
-        String accessToken = "mock-access-token";
+@BeforeEach
+void setUp() throws MalformedURLException {
+    MockitoAnnotations.openMocks(this);
+    userTokenGeneratorService = new UserTokenGeneratorService();
 
-        when(confidentialClientApplication.acquireToken(any(ClientCredentialParameters.class)))
-                .thenReturn(future);
-        when(future.get()).thenReturn(authenticationResult);
-        when(authenticationResult.accessToken()).thenReturn(accessToken);
-        when(authenticationResult.expiresOnDate()).thenReturn(java.util.Date.from(Instant.now().plusSeconds(3600)));
-
-        // Inject internal fields (clientId, clientSecret, etc.) using reflection or test configuration if needed
-
-        // Act
-        Token result = userTokenGeneratorService.generateToken(token);
-
-        // Assert
-        assertNotNull(result);
-        assertEquals(accessToken, result.getAccessToken());
-        assertNotNull(result.getTokenGeneratedTime());
-        assertTrue(result.getExpiresInSeconds() > 0);
-    }
-
-    @Test
-    void testGenerateTokenFailure() throws Exception {
-        // Arrange
-        Token token = new Token();
-
-        when(confidentialClientApplication.acquireToken(any(ClientCredentialParameters.class)))
-                .thenReturn(future);
-        when(future.get()).thenThrow(new ExecutionException("failed", new RuntimeException()));
-
-        // Act & Assert
-        RuntimeException exception = assertThrows(RuntimeException.class, () ->
-                userTokenGeneratorService.generateToken(token));
-        assertTrue(exception.getMessage().contains("Error obtaining AAD Token"));
-    }
+    // Inject required values
+    setField(userTokenGeneratorService, "clientId", "dummy-client-id");
+    setField(userTokenGeneratorService, "clientSecret", "dummy-secret");
+    setField(userTokenGeneratorService, "tenantId", "dummy-tenant");
+    setField(userTokenGeneratorService, "scope", "dummy-scope/.default");
 }
