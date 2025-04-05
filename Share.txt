@@ -1,70 +1,75 @@
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
-
-import java.lang.reflect.Field;
-
-import org.json.JSONObject;
+import com.microsoft.aad.msal4j.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestTemplate;
+import org.mockito.MockitoAnnotations;
 
-@ExtendWith(MockitoExtension.class)
-class AccessTokenGeneratorTest {
+import java.net.MalformedURLException;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
 
-    @Mock
-    private RestTemplate restTemplate;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class UserTokenGeneratorServiceTest {
 
     @InjectMocks
-    private AccessTokenGenerator accessTokenGenerator;
+    private UserTokenGeneratorService userTokenGeneratorService;
 
-    private final String tokenGeneratorUri = "http://mock-api/token";
-    private final String clientId = "mock-client-id";
-    private final String clientSecret = "mock-client-secret";
-    private final String scope = "mock-scope";
-    private final String mockResponse = "{\"access_token\": \"mocked-token\"}";
+    @Mock
+    private ConfidentialClientApplication confidentialClientApplication;
+
+    @Mock
+    private IAuthenticationResult authenticationResult;
+
+    @Mock
+    private CompletableFuture<IAuthenticationResult> future;
 
     @BeforeEach
-    void setUp() throws Exception {
-        setPrivateField(accessTokenGenerator, "tokenGeneratorUri", tokenGeneratorUri);
-        setPrivateField(accessTokenGenerator, "spClientId", clientId);
-        setPrivateField(accessTokenGenerator, "spKey", clientSecret);
-        setPrivateField(accessTokenGenerator, "scope", scope);
-    }
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
 
-    private void setPrivateField(Object target, String fieldName, Object value) throws Exception {
-        Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.set(target, value);
+        // Inject the mock application creation (reflection-based or via setter in real-world use)
     }
 
     @Test
-    void testGenerateToken_Success() throws Exception {
-        ResponseEntity<String> responseEntity = new ResponseEntity<>(mockResponse, HttpStatus.OK);
-        when(restTemplate.postForEntity(eq(tokenGeneratorUri), any(HttpEntity.class), eq(String.class)))
-                .thenReturn(responseEntity);
+    void testGenerateTokenSuccess() throws Exception {
+        // Arrange
+        Token token = new Token();  // assuming a simple POJO
+        String accessToken = "mock-access-token";
 
-        String accessToken = accessTokenGenerator.generateToken();
+        when(confidentialClientApplication.acquireToken(any(ClientCredentialParameters.class)))
+                .thenReturn(future);
+        when(future.get()).thenReturn(authenticationResult);
+        when(authenticationResult.accessToken()).thenReturn(accessToken);
+        when(authenticationResult.expiresOnDate()).thenReturn(java.util.Date.from(Instant.now().plusSeconds(3600)));
 
-        assertNotNull(accessToken);
-        assertEquals("mocked-token", accessToken);
+        // Inject internal fields (clientId, clientSecret, etc.) using reflection or test configuration if needed
 
-        verify(restTemplate, times(1)).postForEntity(eq(tokenGeneratorUri), any(HttpEntity.class), eq(String.class));
+        // Act
+        Token result = userTokenGeneratorService.generateToken(token);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals(accessToken, result.getAccessToken());
+        assertNotNull(result.getTokenGeneratedTime());
+        assertTrue(result.getExpiresInSeconds() > 0);
     }
 
     @Test
-    void testGenerateToken_ThrowsException() {
-        when(restTemplate.postForEntity(eq(tokenGeneratorUri), any(HttpEntity.class), eq(String.class)))
-                .thenThrow(new RuntimeException("API call failed"));
+    void testGenerateTokenFailure() throws Exception {
+        // Arrange
+        Token token = new Token();
 
-        Exception exception = assertThrows(RuntimeException.class, () -> accessTokenGenerator.generateToken());
+        when(confidentialClientApplication.acquireToken(any(ClientCredentialParameters.class)))
+                .thenReturn(future);
+        when(future.get()).thenThrow(new ExecutionException("failed", new RuntimeException()));
 
-        assertEquals("API call failed", exception.getMessage());
+        // Act & Assert
+        RuntimeException exception = assertThrows(RuntimeException.class, () ->
+                userTokenGeneratorService.generateToken(token));
+        assertTrue(exception.getMessage().contains("Error obtaining AAD Token"));
     }
 }
