@@ -1,63 +1,96 @@
-@ExtendWith(MockitoExtension.class)
-class UserTokenGeneratorServiceTest {
+import com.ubs.cumulus.parsingService.xml.morningstar.dto.MorningStarDTO;
+import com.ubs.cumulus.parsingService.xml.morningstar.model.MorningstarList;
+import com.ubs.cumulus.parsingService.xml.morningstar.util.MorningStarInsertValues;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.*;
 
-    private UserTokenGeneratorService userTokenGeneratorService;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.util.*;
+
+import static org.mockito.Mockito.*;
+
+public class MorningStarInsertValuesTest {
+
+    @InjectMocks
+    private MorningStarInsertValues insertValues;
+
+    @Mock
+    private Connection connection;
+
+    @Mock
+    private PreparedStatement preparedStatement;
+
+    @Mock
+    private MorningstarList morningstarList;
+
+    @Mock
+    private MorningStarDTO request;
 
     @BeforeEach
-    void setUp() {
-        userTokenGeneratorService = new UserTokenGeneratorService();
-        setField(userTokenGeneratorService, "clientId", "dummy-client-id");
-        setField(userTokenGeneratorService, "clientSecret", "dummy-client-secret");
-        setField(userTokenGeneratorService, "tenantId", "dummy-tenant-id");
-        setField(userTokenGeneratorService, "scope", "dummy-scope/.default");
+    public void setUp() throws Exception {
+        MockitoAnnotations.openMocks(this);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(request.getTimeStamp()).thenReturn("2024-01-01 10:00:00");
+    }
+
+    private List<Map<String, Object>> createTestData() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("loadtimestamp", "2024-01-01 10:00:00");
+        row.put("process_id", "123");
+        row.put("feedid", "feed-1");
+        row.put("region", "US");
+        row.put("filename", "file.xml");
+        row.put("businessdate", "2024-01-01");
+        row.put("transaction_id", "tx123");
+        row.put("type_of_data", "NAV");
+
+        return Collections.singletonList(row);
     }
 
     @Test
-    void testGenerateTokenSuccess() throws Exception {
-        Token mockToken = new Token();
+    public void testSuccessfulInsert() throws Exception {
+        List<Map<String, Object>> data = createTestData();
+        when(morningstarList.getXmlParsedValuesMapList()).thenReturn(data);
 
-        // Mocks
-        IAuthenticationResult mockAuthResult = mock(IAuthenticationResult.class);
-        when(mockAuthResult.accessToken()).thenReturn("mock-access-token");
-        when(mockAuthResult.expiresOnDate()).thenReturn(Date.from(Instant.now().plusSeconds(3600)));
+        when(preparedStatement.executeBatch()).thenReturn(new int[]{1});
 
-        CompletableFuture<IAuthenticationResult> mockFuture = mock(CompletableFuture.class);
-        when(mockFuture.get()).thenReturn(mockAuthResult);
+        insertValues.insert(morningstarList, request, connection);
 
-        ConfidentialClientApplication mockApp = mock(ConfidentialClientApplication.class);
-        when(mockApp.acquireToken(any())).thenReturn(mockFuture);
-
-        // Static mocking
-        try (MockedStatic<ConfidentialClientApplication> staticMock = Mockito.mockStatic(ConfidentialClientApplication.class)) {
-            ConfidentialClientApplication.Builder mockBuilder = mock(ConfidentialClientApplication.Builder.class);
-
-            staticMock.when(() -> ConfidentialClientApplication.builder(eq("dummy-client-id"), any()))
-                      .thenReturn(mockBuilder);
-
-            when(mockBuilder.authority(anyString())).thenReturn(mockBuilder);
-            when(mockBuilder.build()).thenReturn(mockApp);
-
-            Token result = userTokenGeneratorService.generateToken(mockToken);
-
-            assertNotNull(result.getAccessToken());
-            assertEquals("mock-access-token", result.getAccessToken());
-        }
+        verify(preparedStatement, atLeastOnce()).setString(anyInt(), anyString());
+        verify(preparedStatement, times(1)).executeBatch();
     }
 
-    private void setField(Object target, String fieldName, Object value) {
+    @Test
+    public void testRetryAndSuccessOnSecondAttempt() throws Exception {
+        List<Map<String, Object>> data = createTestData();
+        when(morningstarList.getXmlParsedValuesMapList()).thenReturn(data);
+
+        when(preparedStatement.executeBatch())
+                .thenThrow(new SQLException("DB down"))
+                .thenReturn(new int[]{1}); // Success on retry
+
+        insertValues.insert(morningstarList, request, connection);
+
+        verify(preparedStatement, times(2)).executeBatch();
+    }
+
+    @Test
+    public void testRetryExceedsMaxAndThrows() throws Exception {
+        List<Map<String, Object>> data = createTestData();
+        when(morningstarList.getXmlParsedValuesMapList()).thenReturn(data);
+
+        when(preparedStatement.executeBatch()).thenThrow(new SQLException("Always fail"));
+
         try {
-            Field field = target.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            field.set(target, value);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+            insertValues.insert(morningstarList, request, connection);
+        } catch (RuntimeException e) {
+            // Expected
         }
+
+        verify(preparedStatement, times(4)).executeBatch(); // 3 retries + 1 original
     }
 }
-
-<dependency>
-    <groupId>org.mockito</groupId>
-    <artifactId>mockito-inline</artifactId>
-    <version>4.11.0</version>
-    <scope>test</scope>
-</dependency>
