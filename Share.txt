@@ -1,96 +1,36 @@
-import com.ubs.cumulus.parsingService.xml.morningstar.dto.MorningStarDTO;
-import com.ubs.cumulus.parsingService.xml.morningstar.model.MorningstarList;
-import com.ubs.cumulus.parsingService.xml.morningstar.util.MorningStarInsertValues;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.*;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.util.*;
+public List<Group> getAllSecurityGroupsRaw() {
+    List<Group> groupList = new ArrayList<>();
+    try {
+        HttpClient httpClient = HttpClient.newHttpClient();
+        TokenCredential credential = new DefaultAzureCredentialBuilder().build();
 
-import static org.mockito.Mockito.*;
+        String token = credential.getToken(
+            new TokenRequestContext().addScopes("https://graph.microsoft.com/.default")
+        ).block().getToken();
 
-public class MorningStarInsertValuesTest {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create("https://graph.microsoft.com/v1.0/groups"))
+            .header("Authorization", "Bearer " + token)
+            .header("Accept", "application/json")
+            .build();
 
-    @InjectMocks
-    private MorningStarInsertValues insertValues;
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-    @Mock
-    private Connection connection;
+        // Parse response JSON manually or using Jackson
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode json = mapper.readTree(response.body());
 
-    @Mock
-    private PreparedStatement preparedStatement;
-
-    @Mock
-    private MorningstarList morningstarList;
-
-    @Mock
-    private MorningStarDTO request;
-
-    @BeforeEach
-    public void setUp() throws Exception {
-        MockitoAnnotations.openMocks(this);
-        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
-        when(request.getTimeStamp()).thenReturn("2024-01-01 10:00:00");
-    }
-
-    private List<Map<String, Object>> createTestData() {
-        Map<String, Object> row = new HashMap<>();
-        row.put("loadtimestamp", "2024-01-01 10:00:00");
-        row.put("process_id", "123");
-        row.put("feedid", "feed-1");
-        row.put("region", "US");
-        row.put("filename", "file.xml");
-        row.put("businessdate", "2024-01-01");
-        row.put("transaction_id", "tx123");
-        row.put("type_of_data", "NAV");
-
-        return Collections.singletonList(row);
-    }
-
-    @Test
-    public void testSuccessfulInsert() throws Exception {
-        List<Map<String, Object>> data = createTestData();
-        when(morningstarList.getXmlParsedValuesMapList()).thenReturn(data);
-
-        when(preparedStatement.executeBatch()).thenReturn(new int[]{1});
-
-        insertValues.insert(morningstarList, request, connection);
-
-        verify(preparedStatement, atLeastOnce()).setString(anyInt(), anyString());
-        verify(preparedStatement, times(1)).executeBatch();
-    }
-
-    @Test
-    public void testRetryAndSuccessOnSecondAttempt() throws Exception {
-        List<Map<String, Object>> data = createTestData();
-        when(morningstarList.getXmlParsedValuesMapList()).thenReturn(data);
-
-        when(preparedStatement.executeBatch())
-                .thenThrow(new SQLException("DB down"))
-                .thenReturn(new int[]{1}); // Success on retry
-
-        insertValues.insert(morningstarList, request, connection);
-
-        verify(preparedStatement, times(2)).executeBatch();
-    }
-
-    @Test
-    public void testRetryExceedsMaxAndThrows() throws Exception {
-        List<Map<String, Object>> data = createTestData();
-        when(morningstarList.getXmlParsedValuesMapList()).thenReturn(data);
-
-        when(preparedStatement.executeBatch()).thenThrow(new SQLException("Always fail"));
-
-        try {
-            insertValues.insert(morningstarList, request, connection);
-        } catch (RuntimeException e) {
-            // Expected
+        for (JsonNode groupNode : json.get("value")) {
+            Group group = new Group();
+            group.setId(groupNode.get("id").asText());
+            group.setDisplayName(groupNode.get("displayName").asText());
+            groupList.add(group);
         }
 
-        verify(preparedStatement, times(4)).executeBatch(); // 3 retries + 1 original
+    } catch (Exception e) {
+        throw new RuntimeException("Failed to fetch groups", e);
     }
+
+    return groupList;
 }
