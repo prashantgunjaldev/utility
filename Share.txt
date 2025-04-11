@@ -1,36 +1,50 @@
+public List<Group> getAllGroups(String displayNameFilter) {
+        List<Group> groups = new ArrayList<>();
+        try {
+            HttpClient httpClient = HttpClient.newHttpClient();
+            TokenCredential credential = new DefaultAzureCredentialBuilder().build();
 
-public List<Group> getAllSecurityGroupsRaw() {
-    List<Group> groupList = new ArrayList<>();
-    try {
-        HttpClient httpClient = HttpClient.newHttpClient();
-        TokenCredential credential = new DefaultAzureCredentialBuilder().build();
+            // Get access token
+            AccessToken token = credential.getToken(
+                new TokenRequestContext().addScopes("https://graph.microsoft.com/.default")
+            ).block();
 
-        String token = credential.getToken(
-            new TokenRequestContext().addScopes("https://graph.microsoft.com/.default")
-        ).block().getToken();
+            String baseUrl = "https://graph.microsoft.com/v1.0/groups?$top=100";
 
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create("https://graph.microsoft.com/v1.0/groups"))
-            .header("Authorization", "Bearer " + token)
-            .header("Accept", "application/json")
-            .build();
+            // Add filter if provided
+            if (displayNameFilter != null && !displayNameFilter.isEmpty()) {
+                String encodedFilter = URLEncoder.encode("displayName eq '" + displayNameFilter + "'", StandardCharsets.UTF_8);
+                baseUrl += "&$filter=" + encodedFilter;
+            }
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String url = baseUrl;
+            ObjectMapper mapper = new ObjectMapper();
 
-        // Parse response JSON manually or using Jackson
-        ObjectMapper mapper = new ObjectMapper();
-        JsonNode json = mapper.readTree(response.body());
+            while (url != null) {
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + token.getToken())
+                    .header("Accept", "application/json")
+                    .build();
 
-        for (JsonNode groupNode : json.get("value")) {
-            Group group = new Group();
-            group.setId(groupNode.get("id").asText());
-            group.setDisplayName(groupNode.get("displayName").asText());
-            groupList.add(group);
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                JsonNode json = mapper.readTree(response.body());
+
+                for (JsonNode groupNode : json.get("value")) {
+                    Group group = new Group();
+                    group.setId(groupNode.get("id").asText());
+                    group.setDisplayName(groupNode.get("displayName").asText());
+                    groups.add(group);
+                }
+
+                JsonNode nextLink = json.get("@odata.nextLink");
+                url = (nextLink != null && !nextLink.isNull()) ? nextLink.asText() : null;
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error fetching groups from Microsoft Graph", e);
         }
 
-    } catch (Exception e) {
-        throw new RuntimeException("Failed to fetch groups", e);
+        return groups;
     }
-
-    return groupList;
-}
