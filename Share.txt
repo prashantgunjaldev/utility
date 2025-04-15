@@ -1,40 +1,8 @@
-import com.ubs.cumulus.dataprovider.util.AADSecurityUtil;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.*;
-import org.mockito.junit.jupiter.MockitoExtension;
+@Test
+void testGenerateToken_shouldAssignTokensCorrectly() throws Exception {
+    try (MockedStatic<AADClient> mockedStatic = mockStatic(AADClient.class)) {
+        mockedStatic.when(() -> AADClient.defaultClient(anyString())).thenReturn(aadClient);
 
-import java.lang.reflect.Field;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.*;
-
-@ExtendWith(MockitoExtension.class)
-class AADSecurityUtilTest {
-
-    @InjectMocks
-    private AADSecurityUtil aadSecurityUtil;
-
-    @Mock
-    private AADClient aadClient;
-
-    @Mock
-    private AuthenticatedUser authenticatedUser;
-
-    @BeforeEach
-    void setup() throws Exception {
-        // Inject scope via reflection since it's private and set with @Value
-        Field scopeField = AADSecurityUtil.class.getDeclaredField("scope");
-        scopeField.setAccessible(true);
-        scopeField.set(aadSecurityUtil, "test-scope");
-
-        // Inject static methods using mockStatic if needed (for AADClient)
-        mockStatic(AADClient.class).when(() -> AADClient.defaultClient(anyString())).thenReturn(aadClient);
-    }
-
-    @Test
-    void testGenerateToken_shouldAssignTokensCorrectly() {
         when(aadClient.authenticateByUserAndPassword(any(), any())).thenReturn(authenticatedUser);
         when(authenticatedUser.accessToken()).thenReturn("legacy-token");
 
@@ -45,24 +13,5 @@ class AADSecurityUtilTest {
 
         assertEquals("new-token", spyUtil.getUserAccessToken());
         assertEquals("legacy-token", spyUtil.getDfcAccessToken());
-    }
-
-    @Test
-    void testGetUserAccessToken_returnsAuthToken() throws Exception {
-        // Manually set authToken via reflection
-        Field authTokenField = AADSecurityUtil.class.getDeclaredField("authToken");
-        authTokenField.setAccessible(true);
-        authTokenField.set(aadSecurityUtil, "some-token");
-
-        assertEquals("some-token", aadSecurityUtil.getUserAccessToken());
-    }
-
-    @Test
-    void testGetDfcAccessToken_returnsLegacyAuthToken() throws Exception {
-        Field legacyTokenField = AADSecurityUtil.class.getDeclaredField("legacyAuthToken");
-        legacyTokenField.setAccessible(true);
-        legacyTokenField.set(aadSecurityUtil, "legacy-token");
-
-        assertEquals("legacy-token", aadSecurityUtil.getDfcAccessToken());
     }
 }
