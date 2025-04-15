@@ -1,17 +1,79 @@
-@Test
-void testGenerateToken_shouldAssignTokensCorrectly() throws Exception {
-    try (MockedStatic<AADClient> mockedStatic = mockStatic(AADClient.class)) {
-        mockedStatic.when(() -> AADClient.defaultClient(anyString())).thenReturn(aadClient);
+import com.ubs.cumulus.core.security.kiota.models.Group;
+import com.ubs.cumulus.dataprovider.util.AADSecurityUtil;
+import com.ubs.cumulus.exception.CumulusException;
+import com.microsoft.graph.models.DirectoryObject;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.*;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-        when(aadClient.authenticateByUserAndPassword(any(), any())).thenReturn(authenticatedUser);
-        when(authenticatedUser.accessToken()).thenReturn("legacy-token");
+import java.util.Collections;
+import java.util.List;
 
-        AADSecurityUtil spyUtil = Mockito.spy(aadSecurityUtil);
-        doReturn("new-token").when(spyUtil).getTokenByScope("test-scope");
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
-        spyUtil.generateToken();
+@ExtendWith(MockitoExtension.class)
+class AADSecurityUtilTest {
 
-        assertEquals("new-token", spyUtil.getUserAccessToken());
-        assertEquals("legacy-token", spyUtil.getDfcAccessToken());
+    @InjectMocks
+    private AADSecurityUtil aadSecurityUtil;
+
+    @Mock
+    private GraphApiClient mockClient;
+
+    @Mock
+    private GetByIdsPostRequestBody mockBody;
+
+    @Mock
+    private GetByIdsPostResponse mockResponse;
+
+    @Mock
+    private Group mockRole;
+
+    @Mock
+    private DirectoryObject mockDirectoryObject;
+
+    @BeforeEach
+    void setup() {
+        // If your code uses a method like `createClient(...)`, you'll need to spy or mock that.
+        // Here, we assume you refactor createClient into a protected method so we can mock it
+        aadSecurityUtil = Mockito.spy(new AADSecurityUtil());
+    }
+
+    @Test
+    void testGetSecurityGroupById_shouldReturnGroup_whenValidResponse() {
+        String testId = "test-id";
+        String groupId = "group-123";
+        String displayName = "Test Group";
+
+        doReturn(mockClient).when(aadSecurityUtil).createClient(any());
+        when(mockClient.directoryObjects()).thenReturn(mockClient);
+        when(mockClient.getByIds()).thenReturn(mockClient);
+        when(mockClient.post(any())).thenReturn(mockResponse);
+        when(mockResponse.getValue()).thenReturn(List.of(mockRole));
+
+        when(mockRole.getId()).thenReturn(groupId);
+        when(mockRole.getDisplayName()).thenReturn(displayName);
+
+        Group result = aadSecurityUtil.getSecurityGroupById(testId);
+
+        assertNotNull(result);
+        assertEquals(groupId, result.getId());
+        assertEquals(displayName, result.getDisplayName());
+    }
+
+    @Test
+    void testGetSecurityGroupById_shouldThrowException_whenNoRoles() {
+        String testId = "test-id";
+
+        doReturn(mockClient).when(aadSecurityUtil).createClient(any());
+        when(mockClient.directoryObjects()).thenReturn(mockClient);
+        when(mockClient.getByIds()).thenReturn(mockClient);
+        when(mockClient.post(any())).thenReturn(mockResponse);
+        when(mockResponse.getValue()).thenReturn(Collections.emptyList());
+
+        assertThrows(CumulusException.class, () -> aadSecurityUtil.getSecurityGroupById(testId));
     }
 }
