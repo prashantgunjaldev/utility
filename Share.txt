@@ -1,150 +1,68 @@
-<!-- Mockito with inline mocking support -->
-<dependency>
-    <groupId>org.mockito</groupId>
-    <artifactId>mockito-inline</artifactId>
-    <version>4.0.0</version> <!-- or compatible with your Spring Boot 2 version -->
-    <scope>test</scope>
-</dependency>
-
-<dependency>
-    <groupId>org.mockito</groupId>
-    <artifactId>mockito-junit-jupiter</artifactId>
-    <version>5.12.0</version>
-    <scope>test</scope>
-</dependency>
-
-
-import com.microsoft.aad.msal4j.*;
-import com.azure.identity.DefaultAzureCredential;
-import com.azure.identity.DefaultAzureCredentialBuilder;
-import com.azure.graph.GraphServiceClient;
-import com.microsoft.graph.models.DirectoryObject;
-import com.microsoft.graph.models.Group;
-import com.microsoft.graph.requests.GraphServiceClient;
-import com.microsoft.graph.requests.DirectoryObjectCollectionResponse;
-import com.microsoft.graph.requests.GraphServiceClient;
-import com.microsoft.graph.requests.GroupCollectionPage;
-import com.microsoft.graph.requests.GroupCollectionRequestBuilder;
-import okhttp3.Request;
+import com.ubs.cumulus.dataprovider.util.AADSecurityUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
-import org.springframework.test.util.ReflectionTestUtils;
-import reactor.core.publisher.Mono;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
+import java.lang.reflect.Field;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class AADSecurityUtilTest {
+class AADSecurityUtilTest {
 
     @InjectMocks
     private AADSecurityUtil aadSecurityUtil;
 
     @Mock
-    private ConfidentialClientApplication mockApp;
+    private AADClient aadClient;
 
     @Mock
-    private IAuthenticationResult mockResult;
-
-    @Mock
-    private CompletableFuture<IAuthenticationResult> mockFuture;
-
-    @Mock
-    private DefaultAzureCredential mockCredential;
+    private AuthenticatedUser authenticatedUser;
 
     @BeforeEach
-    public void setup() throws Exception {
-        ReflectionTestUtils.setField(aadSecurityUtil, "newClientId", "test-client-id");
-        ReflectionTestUtils.setField(aadSecurityUtil, "newClientSecret", "test-secret");
-        ReflectionTestUtils.setField(aadSecurityUtil, "tenantId", "test-tenant-id");
+    void setup() throws Exception {
+        // Inject scope via reflection since it's private and set with @Value
+        Field scopeField = AADSecurityUtil.class.getDeclaredField("scope");
+        scopeField.setAccessible(true);
+        scopeField.set(aadSecurityUtil, "test-scope");
+
+        // Inject static methods using mockStatic if needed (for AADClient)
+        mockStatic(AADClient.class).when(() -> AADClient.defaultClient(anyString())).thenReturn(aadClient);
     }
 
     @Test
-    void testGenerateToken() throws Exception {
-        when(mockApp.acquireToken(any(ClientCredentialParameters.class))).thenReturn(mockFuture);
-        when(mockFuture.get()).thenReturn(mockResult);
-        when(mockResult.accessToken()).thenReturn("mocked-access-token");
+    void testGenerateToken_shouldAssignTokensCorrectly() {
+        when(aadClient.authenticateByUserAndPassword(any(), any())).thenReturn(authenticatedUser);
+        when(authenticatedUser.accessToken()).thenReturn("legacy-token");
 
-        // Inject mockApp into util
-        ReflectionTestUtils.setField(aadSecurityUtil, "confidentialClientApplication", mockApp);
+        AADSecurityUtil spyUtil = Mockito.spy(aadSecurityUtil);
+        doReturn("new-token").when(spyUtil).getTokenByScope("test-scope");
 
-        String token = aadSecurityUtil.generateToken();
-        assertEquals("mocked-access-token", token);
+        spyUtil.generateToken();
+
+        assertEquals("new-token", spyUtil.getUserAccessToken());
+        assertEquals("legacy-token", spyUtil.getDfcAccessToken());
     }
 
     @Test
-    void testGetTokenByScope() throws Exception {
-        when(mockApp.acquireToken(any(ClientCredentialParameters.class))).thenReturn(mockFuture);
-        when(mockFuture.get()).thenReturn(mockResult);
-        when(mockResult.accessToken()).thenReturn("mocked-token-scope");
+    void testGetUserAccessToken_returnsAuthToken() throws Exception {
+        // Manually set authToken via reflection
+        Field authTokenField = AADSecurityUtil.class.getDeclaredField("authToken");
+        authTokenField.setAccessible(true);
+        authTokenField.set(aadSecurityUtil, "some-token");
 
-        ReflectionTestUtils.setField(aadSecurityUtil, "confidentialClientApplication", mockApp);
-
-        String token = aadSecurityUtil.getTokenByScope("https://graph.microsoft.com/.default");
-        assertEquals("mocked-token-scope", token);
+        assertEquals("some-token", aadSecurityUtil.getUserAccessToken());
     }
 
     @Test
-    void testGetUserAccessToken() {
-        // Mock credential.getToken() to return token with access token
-        com.azure.core.credential.AccessToken mockAccessToken =
-                new com.azure.core.credential.AccessToken("user-access-token", OffsetDateTime.now().plusHours(1));
+    void testGetDfcAccessToken_returnsLegacyAuthToken() throws Exception {
+        Field legacyTokenField = AADSecurityUtil.class.getDeclaredField("legacyAuthToken");
+        legacyTokenField.setAccessible(true);
+        legacyTokenField.set(aadSecurityUtil, "legacy-token");
 
-        DefaultAzureCredential credential = mock(DefaultAzureCredential.class);
-        when(credential.getToken(any())).thenReturn(Mono.just(mockAccessToken));
-        ReflectionTestUtils.setField(aadSecurityUtil, "credential", credential);
-
-        String token = aadSecurityUtil.getUserAccessToken();
-        assertEquals("user-access-token", token);
-    }
-
-    @Test
-    void testGetSecurityGroupById() {
-        Group mockGroup = new Group();
-        mockGroup.displayName = "Test Group";
-
-        GraphServiceClient<Request> mockGraphClient = mock(GraphServiceClient.class);
-        GraphServiceClient.GroupsCollectionRequestBuilder groupsBuilder = mock(GraphServiceClient.GroupsCollectionRequestBuilder.class);
-        GroupCollectionRequestBuilder groupRequestBuilder = mock(GroupCollectionRequestBuilder.class);
-
-        when(mockGraphClient.groups()).thenReturn(groupsBuilder);
-        when(groupsBuilder.byId(anyString())).thenReturn(groupRequestBuilder);
-        when(groupRequestBuilder.buildRequest()).thenReturn(mock(GroupCollectionRequestBuilder.GroupRequest.class));
-        when(groupRequestBuilder.buildRequest().get()).thenReturn(mockGroup);
-
-        ReflectionTestUtils.setField(aadSecurityUtil, "graphClient", mockGraphClient);
-
-        Group result = aadSecurityUtil.getSecurityGroupById("test-id");
-        assertEquals("Test Group", result.displayName);
-    }
-
-    @Test
-    void testGetSecurityGroups() {
-        Group mockGroup = new Group();
-        mockGroup.displayName = "Group A";
-
-        List<Group> groupList = Collections.singletonList(mockGroup);
-        GroupCollectionPage mockPage = mock(GroupCollectionPage.class);
-        when(mockPage.getCurrentPage()).thenReturn(groupList);
-
-        GraphServiceClient<Request> mockGraphClient = mock(GraphServiceClient.class);
-        GraphServiceClient.GroupsCollectionRequestBuilder groupsBuilder = mock(GraphServiceClient.GroupsCollectionRequestBuilder.class);
-        GroupCollectionRequestBuilder groupRequestBuilder = mock(GroupCollectionRequestBuilder.class);
-
-        when(mockGraphClient.groups()).thenReturn(groupsBuilder);
-        when(groupsBuilder.buildRequest()).thenReturn(groupRequestBuilder);
-        when(groupRequestBuilder.select("id,displayName").get()).thenReturn(mockPage);
-
-        ReflectionTestUtils.setField(aadSecurityUtil, "graphClient", mockGraphClient);
-
-        List<Group> result = aadSecurityUtil.getSecurityGroups();
-        assertEquals(1, result.size());
-        assertEquals("Group A", result.get(0).displayName);
+        assertEquals("legacy-token", aadSecurityUtil.getDfcAccessToken());
     }
 }
-
