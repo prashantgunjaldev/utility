@@ -149,3 +149,45 @@ class AADSecurityUtilTest {
     }
 }
 
+=======================
+@Test
+    void testGetSecurityGroups_success() throws Exception {
+        String accessToken = "mocked-access-token";
+        String mockJson = "{\n" +
+                "  \"value\": [\n" +
+                "    {\"id\": \"group1\", \"displayName\": \"Admins\"},\n" +
+                "    {\"id\": \"group2\", \"displayName\": \"Users\"}\n" +
+                "  ]\n" +
+                "}";
+
+        String mockUrl = "https://graph.microsoft.com/groups";
+
+        try (MockedStatic<DefaultAzureCredentialBuilder> credentialMock = mockStatic(DefaultAzureCredentialBuilder.class)) {
+
+            // Mock TokenCredential
+            DefaultAzureCredentialBuilder builder = mock(DefaultAzureCredentialBuilder.class);
+            credentialMock.when(DefaultAzureCredentialBuilder::new).thenReturn(builder);
+            when(builder.build()).thenReturn(tokenCredential);
+
+            // Mock access token
+            AccessToken accessTokenObj = new AccessToken(accessToken, OffsetDateTime.now().plusHours(1));
+            when(tokenCredential.getToken(any(TokenRequestContext.class))).thenReturn(Mono.just(accessTokenObj));
+
+            // Mock group URL
+            when(GROUPS_URL.getFilterQuery()).thenReturn(mockUrl);
+
+            // Mock HTTP response
+            when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                    .thenReturn(httpResponse);
+            when(httpResponse.body()).thenReturn(mockJson);
+
+            // Act
+            List<Group> result = aadSecurityUtil.getSecurityGroups();
+
+            // Assert
+            assertNotNull(result);
+            assertEquals(2, result.size());
+            assertEquals("group1", result.get(0).getId());
+            assertEquals("Admins", result.get(0).getDisplayName());
+        }
+    }
