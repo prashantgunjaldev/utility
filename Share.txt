@@ -97,3 +97,37 @@ public class FileDownloaderWebClient {
         }
     }
 }
+
+
+===========================
+@RestController
+@RequestMapping("/api")
+public class ProxyDownloadController {
+
+    private final WebClient webClient;
+
+    public ProxyDownloadController(WebClient.Builder builder) {
+        this.webClient = builder.build();
+    }
+
+    @PostMapping("/download-and-proxy")
+    public Mono<ResponseEntity<byte[]>> downloadAndProxy(@RequestBody Map<String, String> request) {
+        String filename = request.get("filename");
+
+        return webClient.post()
+                .uri("http://localhost:8080/download")
+                .bodyValue(Map.of("filename", filename))
+                .exchangeToMono(response -> {
+                    if (response.statusCode().is3xxRedirection()) {
+                        String sasUrl = response.headers().asHttpHeaders().getLocation().toString();
+                        return webClient.get()
+                                .uri(sasUrl)
+                                .retrieve()
+                                .toEntity(byte[].class);
+                    } else {
+                        return Mono.error(new RuntimeException("Expected redirect but got: " + response.statusCode()));
+                    }
+                });
+    }
+}
+
