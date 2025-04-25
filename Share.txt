@@ -40,3 +40,60 @@ public class FileDownloader {
         throw new RuntimeException("Failed to download file");
     }
 }
+
+
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-webflux</artifactId>
+</dependency>
+
+
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+
+import java.util.Map;
+
+@Service
+public class FileDownloaderWebClient {
+
+    private final WebClient webClient;
+
+    public FileDownloaderWebClient(WebClient.Builder builder) {
+        this.webClient = builder.build();
+    }
+
+    public byte[] downloadFile(String filename) {
+        // Step 1: Make POST call to /download
+        ClientResponse response = webClient.post()
+                .uri("http://localhost:8080/download")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(BodyInserters.fromValue(Map.of("filename", filename)))
+                .exchange()
+                .block();
+
+        if (response == null) {
+            throw new RuntimeException("No response received");
+        }
+
+        // Step 2: Handle 303 redirect
+        if (response.statusCode().is3xxRedirection()) {
+            String redirectUrl = response.headers().asHttpHeaders().getLocation().toString();
+
+            // Step 3: Follow the redirect and fetch file
+            return webClient.get()
+                    .uri(redirectUrl)
+                    .retrieve()
+                    .bodyToMono(byte[].class)
+                    .block();
+        } else {
+            throw new RuntimeException("Expected redirect but got status: " + response.statusCode());
+        }
+    }
+}
