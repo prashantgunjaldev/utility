@@ -1,193 +1,42 @@
-import com.ubs.cumulus.core.security.kiota.models.Group;
-import com.ubs.cumulus.dataprovider.util.AADSecurityUtil;
-import com.ubs.cumulus.exception.CumulusException;
-import com.microsoft.graph.models.DirectoryObject;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.*;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.*;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
-import java.util.Collections;
-import java.util.List;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+@Service
+public class FileDownloader {
 
-@ExtendWith(MockitoExtension.class)
-class AADSecurityUtilTest {
+    private final RestTemplate restTemplate = new RestTemplate();
 
-    @InjectMocks
-    private AADSecurityUtil aadSecurityUtil;
+    public byte[] downloadFile(String filename) {
+        // Step 1: Send POST request to your backend
+        String postUrl = "http://localhost:8080/download"; // Your backend API
 
-    @Mock
-    private GraphApiClient mockClient;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Map<String, String>> entity = new HttpEntity<>(Map.of("filename", filename), headers);
 
-    @Mock
-    private GetByIdsPostRequestBody mockBody;
+        ResponseEntity<Void> response = restTemplate.exchange(postUrl, HttpMethod.POST, entity, Void.class);
 
-    @Mock
-    private GetByIdsPostResponse mockResponse;
+        // Step 2: Check redirect location (303 or 302)
+        if (response.getStatusCode().is3xxRedirection()) {
+            String redirectUrl = response.getHeaders().getLocation().toString();
 
-    @Mock
-    private Group mockRole;
+            // Step 3: Follow the redirect and fetch file
+            ResponseEntity<ByteArrayResource> fileResponse = restTemplate.exchange(
+                    redirectUrl,
+                    HttpMethod.GET,
+                    null,
+                    ByteArrayResource.class
+            );
 
-    @Mock
-    private DirectoryObject mockDirectoryObject;
-
-    @BeforeEach
-    void setup() {
-        // If your code uses a method like `createClient(...)`, you'll need to spy or mock that.
-        // Here, we assume you refactor createClient into a protected method so we can mock it
-        aadSecurityUtil = Mockito.spy(new AADSecurityUtil());
-    }
-
-    @Test
-    void testGetSecurityGroupById_shouldReturnGroup_whenValidResponse() {
-        String testId = "test-id";
-        String groupId = "group-123";
-        String displayName = "Test Group";
-
-        doReturn(mockClient).when(aadSecurityUtil).createClient(any());
-        when(mockClient.directoryObjects()).thenReturn(mockClient);
-        when(mockClient.getByIds()).thenReturn(mockClient);
-        when(mockClient.post(any())).thenReturn(mockResponse);
-        when(mockResponse.getValue()).thenReturn(List.of(mockRole));
-
-        when(mockRole.getId()).thenReturn(groupId);
-        when(mockRole.getDisplayName()).thenReturn(displayName);
-
-        Group result = aadSecurityUtil.getSecurityGroupById(testId);
-
-        assertNotNull(result);
-        assertEquals(groupId, result.getId());
-        assertEquals(displayName, result.getDisplayName());
-    }
-
-    @Test
-    void testGetSecurityGroupById_shouldThrowException_whenNoRoles() {
-        String testId = "test-id";
-
-        doReturn(mockClient).when(aadSecurityUtil).createClient(any());
-        when(mockClient.directoryObjects()).thenReturn(mockClient);
-        when(mockClient.getByIds()).thenReturn(mockClient);
-        when(mockClient.post(any())).thenReturn(mockResponse);
-        when(mockResponse.getValue()).thenReturn(Collections.emptyList());
-
-        assertThrows(CumulusException.class, () -> aadSecurityUtil.getSecurityGroupById(testId));
-    }
-}
-
-=============
-=============
-import com.ubs.cumulus.dataprovider.util.AADSecurityUtil;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.*;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.lang.reflect.Field;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.*;
-
-@ExtendWith(MockitoExtension.class)
-class AADSecurityUtilTest {
-
-    @InjectMocks
-    private AADSecurityUtil aadSecurityUtil;
-
-    @Mock
-    private AADClient aadClient;
-
-    @Mock
-    private AuthenticatedUser authenticatedUser;
-
-    @BeforeEach
-    void setup() throws Exception {
-        // Inject scope via reflection since it's private and set with @Value
-        Field scopeField = AADSecurityUtil.class.getDeclaredField("scope");
-        scopeField.setAccessible(true);
-        scopeField.set(aadSecurityUtil, "test-scope");
-
-        // Inject static methods using mockStatic if needed (for AADClient)
-        mockStatic(AADClient.class).when(() -> AADClient.defaultClient(anyString())).thenReturn(aadClient);
-    }
-
-    @Test
-    void testGenerateToken_shouldAssignTokensCorrectly() {
-        when(aadClient.authenticateByUserAndPassword(any(), any())).thenReturn(authenticatedUser);
-        when(authenticatedUser.accessToken()).thenReturn("legacy-token");
-
-        AADSecurityUtil spyUtil = Mockito.spy(aadSecurityUtil);
-        doReturn("new-token").when(spyUtil).getTokenByScope("test-scope");
-
-        spyUtil.generateToken();
-
-        assertEquals("new-token", spyUtil.getUserAccessToken());
-        assertEquals("legacy-token", spyUtil.getDfcAccessToken());
-    }
-
-    @Test
-    void testGetUserAccessToken_returnsAuthToken() throws Exception {
-        // Manually set authToken via reflection
-        Field authTokenField = AADSecurityUtil.class.getDeclaredField("authToken");
-        authTokenField.setAccessible(true);
-        authTokenField.set(aadSecurityUtil, "some-token");
-
-        assertEquals("some-token", aadSecurityUtil.getUserAccessToken());
-    }
-
-    @Test
-    void testGetDfcAccessToken_returnsLegacyAuthToken() throws Exception {
-        Field legacyTokenField = AADSecurityUtil.class.getDeclaredField("legacyAuthToken");
-        legacyTokenField.setAccessible(true);
-        legacyTokenField.set(aadSecurityUtil, "legacy-token");
-
-        assertEquals("legacy-token", aadSecurityUtil.getDfcAccessToken());
-    }
-}
-
-=======================
-@Test
-    void testGetSecurityGroups_success() throws Exception {
-        String accessToken = "mocked-access-token";
-        String mockJson = "{\n" +
-                "  \"value\": [\n" +
-                "    {\"id\": \"group1\", \"displayName\": \"Admins\"},\n" +
-                "    {\"id\": \"group2\", \"displayName\": \"Users\"}\n" +
-                "  ]\n" +
-                "}";
-
-        String mockUrl = "https://graph.microsoft.com/groups";
-
-        try (MockedStatic<DefaultAzureCredentialBuilder> credentialMock = mockStatic(DefaultAzureCredentialBuilder.class)) {
-
-            // Mock TokenCredential
-            DefaultAzureCredentialBuilder builder = mock(DefaultAzureCredentialBuilder.class);
-            credentialMock.when(DefaultAzureCredentialBuilder::new).thenReturn(builder);
-            when(builder.build()).thenReturn(tokenCredential);
-
-            // Mock access token
-            AccessToken accessTokenObj = new AccessToken(accessToken, OffsetDateTime.now().plusHours(1));
-            when(tokenCredential.getToken(any(TokenRequestContext.class))).thenReturn(Mono.just(accessTokenObj));
-
-            // Mock group URL
-            when(GROUPS_URL.getFilterQuery()).thenReturn(mockUrl);
-
-            // Mock HTTP response
-            when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                    .thenReturn(httpResponse);
-            when(httpResponse.body()).thenReturn(mockJson);
-
-            // Act
-            List<Group> result = aadSecurityUtil.getSecurityGroups();
-
-            // Assert
-            assertNotNull(result);
-            assertEquals(2, result.size());
-            assertEquals("group1", result.get(0).getId());
-            assertEquals("Admins", result.get(0).getDisplayName());
+            if (fileResponse.getStatusCode().is2xxSuccessful()) {
+                return fileResponse.getBody().getByteArray();
+            }
         }
+
+        throw new RuntimeException("Failed to download file");
     }
+}
