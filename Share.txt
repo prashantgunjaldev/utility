@@ -1,133 +1,65 @@
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.*;
-import org.springframework.stereotype.Service;
+package util;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URI;
+import java.util.HashMap;
 import java.util.Map;
 
-@Service
-public class FileDownloader {
+public class RedirectingHttpClient {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
-    public byte[] downloadFile(String filename) {
-        // Step 1: Send POST request to your backend
-        String postUrl = "http://localhost:8080/download"; // Your backend API
+    public RedirectingHttpClient() {
+        // Disable auto-redirect so we can manually handle it
+        this.restTemplate = new RestTemplate(new HttpComponentsClientHttpRequestFactory());
+    }
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, String>> entity = new HttpEntity<>(Map.of("filename", filename), headers);
+    public String postAndFollowRedirect(String baseUrl) {
+        String postUrl = baseUrl + "/submit";
 
-        ResponseEntity<Void> response = restTemplate.exchange(postUrl, HttpMethod.POST, entity, Void.class);
+        // POST body
+        Map<String, String> request = new HashMap<>();
+        request.put("name", "John");
 
-        // Step 2: Check redirect location (303 or 302)
+        // Make POST call
+        ResponseEntity<Void> response = restTemplate.postForEntity(postUrl, request, Void.class);
+
         if (response.getStatusCode().is3xxRedirection()) {
-            String redirectUrl = response.getHeaders().getLocation().toString();
+            URI redirectUri = response.getHeaders().getLocation();
 
-            // Step 3: Follow the redirect and fetch file
-            ResponseEntity<ByteArrayResource> fileResponse = restTemplate.exchange(
-                    redirectUrl,
-                    HttpMethod.GET,
-                    null,
-                    ByteArrayResource.class
-            );
-
-            if (fileResponse.getStatusCode().is2xxSuccessful()) {
-                return fileResponse.getBody().getByteArray();
+            if (redirectUri != null) {
+                // Absolute redirect if needed
+                String getUrl = redirectUri.isAbsolute() ? redirectUri.toString() : baseUrl + redirectUri.toString();
+                return restTemplate.getForObject(getUrl, String.class);
             }
         }
 
-        throw new RuntimeException("Failed to download file");
+        return "No redirect occurred.";
+    }
+
+    public static void main(String[] args) {
+        RedirectingHttpClient client = new RedirectingHttpClient();
+        String result = client.postAndFollowRedirect("http://localhost:8080");
+        System.out.println(result);
     }
 }
 
+===================================
 
-<dependency>
-  <groupId>org.springframework.boot</groupId>
-  <artifactId>spring-boot-starter-webflux</artifactId>
-</dependency>
-
-
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.ClientResponse;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
-
-import java.util.Map;
-
-@Service
-public class FileDownloaderWebClient {
-
-    private final WebClient webClient;
-
-    public FileDownloaderWebClient(WebClient.Builder builder) {
-        this.webClient = builder.build();
+    @PostMapping("/submit")
+    public ResponseEntity<Void> submitData() {
+        // Here you might process the data...
+        URI redirectUri = URI.create("https://dummy.restapiexample.com/api/v1/employees");
+        return ResponseEntity.status(HttpStatus.SEE_OTHER)
+                .location(redirectUri)
+                .build();
     }
 
-    public byte[] downloadFile(String filename) {
-        // Step 1: Make POST call to /download
-        ClientResponse response = webClient.post()
-                .uri("http://localhost:8080/download")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(BodyInserters.fromValue(Map.of("filename", filename)))
-                .exchange()
-                .block();
-
-        if (response == null) {
-            throw new RuntimeException("No response received");
-        }
-
-        // Step 2: Handle 303 redirect
-        if (response.statusCode().is3xxRedirection()) {
-            String redirectUrl = response.headers().asHttpHeaders().getLocation().toString();
-
-            // Step 3: Follow the redirect and fetch file
-            return webClient.get()
-                    .uri(redirectUrl)
-                    .retrieve()
-                    .bodyToMono(byte[].class)
-                    .block();
-        } else {
-            throw new RuntimeException("Expected redirect but got status: " + response.statusCode());
-        }
-    }
-}
-
-
-===========================
-@RestController
-@RequestMapping("/api")
-public class ProxyDownloadController {
-
-    private final WebClient webClient;
-
-    public ProxyDownloadController(WebClient.Builder builder) {
-        this.webClient = builder.build();
-    }
-
-    @PostMapping("/download-and-proxy")
-    public Mono<ResponseEntity<byte[]>> downloadAndProxy(@RequestBody Map<String, String> request) {
-        String filename = request.get("filename");
-
-        return webClient.post()
-                .uri("http://localhost:8080/download")
-                .bodyValue(Map.of("filename", filename))
-                .exchangeToMono(response -> {
-                    if (response.statusCode().is3xxRedirection()) {
-                        String sasUrl = response.headers().asHttpHeaders().getLocation().toString();
-                        return webClient.get()
-                                .uri(sasUrl)
-                                .retrieve()
-                                .toEntity(byte[].class);
-                    } else {
-                        return Mono.error(new RuntimeException("Expected redirect but got: " + response.statusCode()));
-                    }
-                });
-    }
-}
-
+================
+		<dependency>
+			<groupId>org.apache.httpcomponents</groupId>
+			<artifactId>httpclient</artifactId>
+		</dependency>
