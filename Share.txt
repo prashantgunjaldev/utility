@@ -27,3 +27,9 @@ Mono<ResponseEntity<byte[]>> data = cleanClient.get()
     .toEntity(byte[].class);
 
 // Then block or return depending on your controller
+
+.defaultHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/112 Safari/537.36")
+    .defaultHeader("Accept", "*/*") // Important
+    .defaultHeader("Connection", "keep-alive") // Important
+    .defaultHeader("Accept-Encoding", "gzip, deflate, br") // Important
+    .build();
