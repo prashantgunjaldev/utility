@@ -1,65 +1,29 @@
-package util;
+import reactor.netty.http.client.HttpClient;
+import org.springframework.web.reactive.function.client.WebClient;
+import java.time.Duration;
+import io.netty.handler.ssl.SslContextBuilder;
+import javax.net.ssl.SSLException;
+import reactor.netty.transport.logging.AdvancedByteBufFormat;
+import reactor.netty.transport.TransportConfig;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
-import org.springframework.web.client.RestTemplate;
+// Build a custom HttpClient that trusts all certificates
+HttpClient httpClient = HttpClient.create()
+    .followRedirect(true) // automatically follow redirects
+    .secure(sslSpec -> sslSpec.sslContext(SslContextBuilder.forClient()
+        .trustManager(InsecureTrustManagerFactory.INSTANCE))) // trust all SSL certs
+    .responseTimeout(Duration.ofSeconds(60));
 
-import java.net.URI;
-import java.util.HashMap;
-import java.util.Map;
+// Build WebClient with advanced settings
+WebClient cleanClient = WebClient.builder()
+    .clientConnector(new reactor.netty.http.client.HttpClientConnector(httpClient))
+    .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/112 Safari/537.36")
+    .build();
 
-public class RedirectingHttpClient {
+// Now do the GET call
+Mono<ResponseEntity<byte[]>> data = cleanClient.get()
+    .uri(sasUrl)
+    .retrieve()
+    .toEntity(byte[].class);
 
-    private final RestTemplate restTemplate;
-
-    public RedirectingHttpClient() {
-        // Disable auto-redirect so we can manually handle it
-        this.restTemplate = new RestTemplate(new HttpComponentsClientHttpRequestFactory());
-    }
-
-    public String postAndFollowRedirect(String baseUrl) {
-        String postUrl = baseUrl + "/submit";
-
-        // POST body
-        Map<String, String> request = new HashMap<>();
-        request.put("name", "John");
-
-        // Make POST call
-        ResponseEntity<Void> response = restTemplate.postForEntity(postUrl, request, Void.class);
-
-        if (response.getStatusCode().is3xxRedirection()) {
-            URI redirectUri = response.getHeaders().getLocation();
-
-            if (redirectUri != null) {
-                // Absolute redirect if needed
-                String getUrl = redirectUri.isAbsolute() ? redirectUri.toString() : baseUrl + redirectUri.toString();
-                return restTemplate.getForObject(getUrl, String.class);
-            }
-        }
-
-        return "No redirect occurred.";
-    }
-
-    public static void main(String[] args) {
-        RedirectingHttpClient client = new RedirectingHttpClient();
-        String result = client.postAndFollowRedirect("http://localhost:8080");
-        System.out.println(result);
-    }
-}
-
-===================================
-
-    @PostMapping("/submit")
-    public ResponseEntity<Void> submitData() {
-        // Here you might process the data...
-        URI redirectUri = URI.create("https://dummy.restapiexample.com/api/v1/employees");
-        return ResponseEntity.status(HttpStatus.SEE_OTHER)
-                .location(redirectUri)
-                .build();
-    }
-
-================
-		<dependency>
-			<groupId>org.apache.httpcomponents</groupId>
-			<artifactId>httpclient</artifactId>
-		</dependency>
+// Then block or return depending on your controller
