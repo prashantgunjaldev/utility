@@ -1,30 +1,6 @@
-@RestController
-public class FileProxyController {
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
+</dependency>
 
-    private final WebClient webClient;
-
-    public FileProxyController() {
-        this.webClient = WebClient.builder()
-            .exchangeStrategies(ExchangeStrategies.builder()
-                .codecs(configurer -> configurer.defaultCodecs()
-                    .maxInMemorySize(1 * 1024 * 1024))  // 1MB buffer (only for small metadata if needed)
-                .build())
-            .build();
-    }
-
-    @GetMapping("/proxy-download")
-    public Mono<ResponseEntity<Flux<DataBuffer>>> proxyDownload(@RequestParam String sasUrl) {
-        Flux<DataBuffer> fileStream = webClient.get()
-            .uri(URI.create(sasUrl))
-            .accept(MediaType.APPLICATION_OCTET_STREAM)
-            .retrieve()
-            .bodyToFlux(DataBuffer.class);
-
-        return Mono.just(
-            ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"downloaded_file\"")
-                .body(fileStream)
-        );
-    }
-}
+, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE
