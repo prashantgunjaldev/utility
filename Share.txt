@@ -1,6 +1,48 @@
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-webflux</artifactId>
-</dependency>
+API Endpoint: /download
+Description
+The /download endpoint validates if the authenticated user has the necessary access rights to download a specified file. If the validation passes, the API responds with an HTTP 302 Redirect (Post to Get pattern) to a secure pre-signed download URL.
 
-, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE
+Method
+POST
+
+Request Headers
+
+Header	Required	Description
+Authorization	Yes	Bearer token for user authentication
+Request Body (JSON)
+json
+Copy
+Edit
+{
+  "fileId": "string"
+}
+
+Field	Type	Required	Description
+fileId	string	Yes	Identifier of the file to download
+Response
+On Success (302 Redirect)
+HTTP Status Code: 302 Found
+
+Location Header: Contains the redirect URL for the file download (GET request).
+
+Body: Empty
+
+On Failure
+403 Forbidden: If user lacks necessary access rights.
+
+401 Unauthorized: If the request is unauthenticated or token is invalid.
+
+404 Not Found: If the fileId does not exist.
+
+Sample CURL Request
+bash
+Copy
+Edit
+curl -X POST https://yourdomain.com/api/download \
+  -H "Authorization: Bearer <your_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"fileId": "12345"}' \
+  -i
+Note: Observe the Location header in the response for the actual download URL.
+
+Sample Java Client Code
