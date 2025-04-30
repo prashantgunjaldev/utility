@@ -1,48 +1,12 @@
-API Endpoint: /download
-Description
-The /download endpoint validates if the authenticated user has the necessary access rights to download a specified file. If the validation passes, the API responds with an HTTP 302 Redirect (Post to Get pattern) to a secure pre-signed download URL.
+redirect_url=$(curl -s -i -X POST 'https://api-cumulus-dev.ubsdev.net/cumu-distribution-hub' \
+  -H 'Authorization: Bearer <your_token>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "fileName": "govt_agency_regl_lamr.cax",
+        "businessDate": "2025-04-27",
+        "vendor": "bloomberg",
+        "vendorAccount": "CumulusbuysidecredDL266332"
+      }' | grep -i '^Location:' | cut -d' ' -f2 | tr -d '\r')
 
-Method
-POST
-
-Request Headers
-
-Header	Required	Description
-Authorization	Yes	Bearer token for user authentication
-Request Body (JSON)
-json
-Copy
-Edit
-{
-  "fileId": "string"
-}
-
-Field	Type	Required	Description
-fileId	string	Yes	Identifier of the file to download
-Response
-On Success (302 Redirect)
-HTTP Status Code: 302 Found
-
-Location Header: Contains the redirect URL for the file download (GET request).
-
-Body: Empty
-
-On Failure
-403 Forbidden: If user lacks necessary access rights.
-
-401 Unauthorized: If the request is unauthenticated or token is invalid.
-
-404 Not Found: If the fileId does not exist.
-
-Sample CURL Request
-bash
-Copy
-Edit
-curl -X POST https://yourdomain.com/api/download \
-  -H "Authorization: Bearer <your_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"fileId": "12345"}' \
-  -i
-Note: Observe the Location header in the response for the actual download URL.
-
-Sample Java Client Code
+# Download the file
+curl -L "$redirect_url" -o downloaded_file.cax
