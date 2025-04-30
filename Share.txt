@@ -1,12 +1,39 @@
-redirect_url=$(curl -s -i -X POST 'https://api-cumulus-dev.ubsdev.net/cumu-distribution-hub' \
-  -H 'Authorization: Bearer <your_token>' \
-  -H 'Content-Type: application/json' \
-  -d '{
-        "fileName": "govt_agency_regl_lamr.cax",
-        "businessDate": "2025-04-27",
-        "vendor": "bloomberg",
-        "vendorAccount": "CumulusbuysidecredDL266332"
-      }' | grep -i '^Location:' | cut -d' ' -f2 | tr -d '\r')
+# Configuration
+$apiUrl = "https://api-cumulus-dev.ubsdev.net/cumu-distribution-hub"
+$token = "eyJ0eXA..."  # <-- Replace with your actual token
+$body = @{
+    fileName       = "govt_agency_regl_lamr.cax"
+    businessDate   = "2025-04-27"
+    vendor         = "bloomberg"
+    vendorAccount  = "CumulusbuysidecredDL266332"
+} | ConvertTo-Json -Compress
 
-# Download the file
-curl -L "$redirect_url" -o downloaded_file.cax
+# Step 1: Send POST and capture headers
+$response = Invoke-WebRequest -Uri $apiUrl `
+                              -Method POST `
+                              -Headers @{
+                                  "Authorization" = "Bearer $token"
+                                  "Content-Type"  = "application/json"
+                              } `
+                              -Body $body `
+                              -MaximumRedirection 0 `
+                              -ErrorAction SilentlyContinue
+
+# Step 2: Extract redirect URL
+$redirectUrl = $response.Headers["Location"]
+
+if ($redirectUrl) {
+    Write-Host "Redirect URL found:"
+    Write-Host $redirectUrl
+
+    # Step 3: Download the file
+    $outputFile = "downloaded_file.cax"
+    Invoke-WebRequest -Uri $redirectUrl -OutFile $outputFile
+
+    Write-Host "`nFile downloaded to: $outputFile"
+} else {
+    Write-Host "❌ Redirect URL not found in Location header."
+    Write-Host "Response Status Code: $($response.StatusCode)"
+    Write-Host "Response Body:"
+    Write-Host $response.Content
+}
