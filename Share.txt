@@ -1,39 +1,108 @@
-# Configuration
-$apiUrl = "https://api-cumulus-dev.ubsdev.net/cumu-distribution-hub"
-$token = "eyJ0eXA..."  # <-- Replace with your actual token
-$body = @{
-    fileName       = "govt_agency_regl_lamr.cax"
-    businessDate   = "2025-04-27"
-    vendor         = "bloomberg"
-    vendorAccount  = "CumulusbuysidecredDL266332"
-} | ConvertTo-Json -Compress
+import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
-# Step 1: Send POST and capture headers
-$response = Invoke-WebRequest -Uri $apiUrl `
-                              -Method POST `
-                              -Headers @{
-                                  "Authorization" = "Bearer $token"
-                                  "Content-Type"  = "application/json"
-                              } `
-                              -Body $body `
-                              -MaximumRedirection 0 `
-                              -ErrorAction SilentlyContinue
+public class MultiThreadedFileDownloader {
 
-# Step 2: Extract redirect URL
-$redirectUrl = $response.Headers["Location"]
+    private static final int THREAD_COUNT = 10; // Adjustable
 
-if ($redirectUrl) {
-    Write-Host "Redirect URL found:"
-    Write-Host $redirectUrl
+    public static void main(String[] args) throws Exception {
+        if (args.length < 4) {
+            System.out.println("Usage: java MultiThreadedFileDownloader <URL_LIST_FILE> <CSV_FILE> <AUTH_URL> <DOWNLOAD_DIR>");
+            return;
+        }
 
-    # Step 3: Download the file
-    $outputFile = "downloaded_file.cax"
-    Invoke-WebRequest -Uri $redirectUrl -OutFile $outputFile
+        String urlListFile = args[0];
+        String csvFile = args[1];
+        String authUrl = args[2];
+        String downloadDir = args[3];
 
-    Write-Host "`nFile downloaded to: $outputFile"
-} else {
-    Write-Host "❌ Redirect URL not found in Location header."
-    Write-Host "Response Status Code: $($response.StatusCode)"
-    Write-Host "Response Body:"
-    Write-Host $response.Content
+        String authToken = fetchAuthToken(authUrl);
+
+        List<String> urls = Files.readAllLines(Path.of(urlListFile));
+        List<Map<String, String>> params = parseCsv(csvFile);
+
+        Files.createDirectories(Path.of(downloadDir));
+
+        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+
+        for (int i = 0; i < urls.size(); i++) {
+            int index = i;
+            executor.submit(() -> downloadFileWithRedirect(urls.get(index), params.get(index), authToken, downloadDir));
+        }
+
+        executor.shutdown();
+        System.out.println("Download tasks submitted.");
+    }
+
+    private static String fetchAuthToken(String authUrl) throws IOException {
+        URL url = new URL(authUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+            return reader.lines().collect(Collectors.joining());
+        }
+    }
+
+    private static void downloadFileWithRedirect(String urlString, Map<String, String> params, String authToken, String downloadDir) {
+        try {
+            long start = System.currentTimeMillis();
+            URL url = new URL(urlString);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Authorization", "Bearer " + authToken);
+            conn.setDoOutput(true);
+
+            try (OutputStream os = conn.getOutputStream()) {
+                String postData = "filename=" + params.get("filename") + "&businessDate=" + params.get("businessDate") + "&vendor=" + params.get("vendor");
+                os.write(postData.getBytes());
+            }
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode == 303) {
+                String redirectUrl = conn.getHeaderField("Location");
+                downloadFile(redirectUrl, downloadDir, start);
+            } else {
+                System.err.println("Unexpected response: " + responseCode);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error downloading file: " + e.getMessage());
+        }
+    }
+
+    private static void downloadFile(String fileUrl, String downloadDir, long start) throws IOException {
+        URL url = new URL(fileUrl);
+        String fileName = url.getPath().substring(url.getPath().lastIndexOf('/') + 1);
+        Path destination = Path.of(downloadDir, fileName);
+
+        try (InputStream in = url.openStream()) {
+            Files.copy(in, destination, StandardCopyOption.REPLACE_EXISTING);
+            long duration = System.currentTimeMillis() - start;
+            System.out.println("Downloaded: " + destination + " in " + duration + " ms");
+            Files.writeString(Path.of(downloadDir, "download_stats.txt"), "Downloaded: " + fileName + " in " + duration + " ms\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        }
+    }
+
+    private static List<Map<String, String>> parseCsv(String csvFile) throws IOException {
+        return Files.readAllLines(Path.of(csvFile)).stream().skip(1).map(line -> {
+            String[] parts = line.split(",");
+            return Map.of(
+                    "filename", parts[0],
+                    "businessDate", parts[1],
+                    "vendor", parts[2]
+            );
+        }).collect(Collectors.toList());
+    }
 }
