@@ -17,27 +17,25 @@ public class MultiThreadedFileDownloader {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 4) {
-            System.out.println("Usage: java MultiThreadedFileDownloader <URL_LIST_FILE> <CSV_FILE> <AUTH_URL> <DOWNLOAD_DIR>");
+            System.out.println("Usage: java MultiThreadedFileDownloader <DOWNLOAD_URL> <CSV_FILE> <AUTH_URL> <DOWNLOAD_DIR>");
             return;
         }
 
-        String urlListFile = args[0];
+        String downloadUrl = args[0];
         String csvFile = args[1];
         String authUrl = args[2];
         String downloadDir = args[3];
 
         String authToken = fetchAuthToken(authUrl);
 
-        List<String> urls = Files.readAllLines(Path.of(urlListFile));
         List<Map<String, String>> params = parseCsv(csvFile);
 
         Files.createDirectories(Path.of(downloadDir));
 
         ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
 
-        for (int i = 0; i < urls.size(); i++) {
-            int index = i;
-            executor.submit(() -> downloadFileWithRedirect(urls.get(index), params.get(index), authToken, downloadDir));
+        for (Map<String, String> param : params) {
+            executor.submit(() -> downloadFileWithRedirect(downloadUrl, param, authToken, downloadDir));
         }
 
         executor.shutdown();
