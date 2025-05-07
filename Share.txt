@@ -6,40 +6,54 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 public class MultiThreadedFileDownloader {
 
-    private static final int THREAD_COUNT = 10; // Adjustable
+    private static final int MAX_THREADS = 500; // Adjustable
+
+    // Environment specific URLs
+    private static final String DEV_DOWNLOAD_URL = "https://dev.example.com/download";
+    private static final String TEST_DOWNLOAD_URL = "https://test.example.com/download";
+    private static final String DEV_AUTH_URL = "https://dev.example.com/auth";
+    private static final String TEST_AUTH_URL = "https://test.example.com/auth";
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 4) {
-            System.out.println("Usage: java MultiThreadedFileDownloader <DOWNLOAD_URL> <CSV_FILE> <AUTH_URL> <DOWNLOAD_DIR>");
+        String csvFile = null, downloadDir = null, env = "dev";
+        boolean downloadEnabled = true;
+
+        for (String arg : args) {
+            if (arg.startsWith("csvFile=")) csvFile = arg.split("=", 2)[1];
+            else if (arg.startsWith("downloadDir=")) downloadDir = arg.split("=", 2)[1];
+            else if (arg.startsWith("env=")) env = arg.split("=", 2)[1];
+            else if (arg.startsWith("downloadEnabled=")) downloadEnabled = Boolean.parseBoolean(arg.split("=", 2)[1]);
+        }
+
+        if (csvFile == null) {
+            System.out.println("Usage: java MultiThreadedFileDownloader csvFile=<CSV_FILE_PATH> [downloadDir=<DOWNLOAD_DIR>] [env=dev/test] [downloadEnabled=true/false]");
             return;
         }
 
-        String downloadUrl = args[0];
-        String csvFile = args[1];
-        String authUrl = args[2];
-        String downloadDir = args[3];
+        String downloadUrl = env.equalsIgnoreCase("test") ? TEST_DOWNLOAD_URL : DEV_DOWNLOAD_URL;
+        String authUrl = env.equalsIgnoreCase("test") ? TEST_AUTH_URL : DEV_AUTH_URL;
 
         String authToken = fetchAuthToken(authUrl);
-
         List<Map<String, String>> params = parseCsv(csvFile);
+        if (downloadEnabled) Files.createDirectories(Path.of(downloadDir));
 
-        Files.createDirectories(Path.of(downloadDir));
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        int optimalThreads = Math.min(MAX_THREADS, availableProcessors * 2);
 
-        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+        ExecutorService executor = Executors.newFixedThreadPool(optimalThreads);
 
         for (Map<String, String> param : params) {
-            executor.submit(() -> downloadFileWithRedirect(downloadUrl, param, authToken, downloadDir));
+            executor.submit(() -> generateSasOrDownload(downloadUrl, param, authToken, downloadDir, downloadEnabled));
         }
 
         executor.shutdown();
-        System.out.println("Download tasks submitted.");
+        executor.awaitTermination(1, TimeUnit.HOURS);
+        System.out.println("All tasks completed.");
     }
 
     private static String fetchAuthToken(String authUrl) throws IOException {
@@ -48,11 +62,12 @@ public class MultiThreadedFileDownloader {
         conn.setRequestMethod("GET");
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-            return reader.lines().collect(Collectors.joining());
+            String response = reader.lines().collect(Collectors.joining());
+            return response.split("\"")[3];
         }
     }
 
-    private static void downloadFileWithRedirect(String urlString, Map<String, String> params, String authToken, String downloadDir) {
+    private static void generateSasOrDownload(String urlString, Map<String, String> params, String authToken, String downloadDir, boolean downloadEnabled) {
         try {
             long start = System.currentTimeMillis();
             URL url = new URL(urlString);
@@ -67,29 +82,30 @@ public class MultiThreadedFileDownloader {
                 os.write(postData.getBytes());
             }
 
-            int responseCode = conn.getResponseCode();
-            if (responseCode == 303) {
+            if (conn.getResponseCode() == 303) {
                 String redirectUrl = conn.getHeaderField("Location");
-                downloadFile(redirectUrl, downloadDir, start);
-            } else {
-                System.err.println("Unexpected response: " + responseCode);
-            }
+                long duration = System.currentTimeMillis() - start;
+                System.out.println("SAS URL Generated: " + redirectUrl + " in " + duration + " ms");
+                Files.writeString(Path.of(downloadDir, "sas_stats.txt"), "SAS URL: " + redirectUrl + " in " + duration + " ms\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 
+                if (downloadEnabled) downloadFile(redirectUrl, downloadDir, params.get("filename"));
+            }
         } catch (Exception e) {
-            System.err.println("Error downloading file: " + e.getMessage());
+            System.err.println("Failed to generate SAS URL for " + params.get("filename"));
         }
     }
 
-    private static void downloadFile(String fileUrl, String downloadDir, long start) throws IOException {
+    private static void downloadFile(String fileUrl, String downloadDir, String filename) throws IOException {
+        long start = System.currentTimeMillis();
         URL url = new URL(fileUrl);
-        String fileName = url.getPath().substring(url.getPath().lastIndexOf('/') + 1);
-        Path destination = Path.of(downloadDir, fileName);
+        String timestampedName = filename + "_" + System.currentTimeMillis();
+        Path destination = Path.of(downloadDir, timestampedName);
 
         try (InputStream in = url.openStream()) {
             Files.copy(in, destination, StandardCopyOption.REPLACE_EXISTING);
             long duration = System.currentTimeMillis() - start;
             System.out.println("Downloaded: " + destination + " in " + duration + " ms");
-            Files.writeString(Path.of(downloadDir, "download_stats.txt"), "Downloaded: " + fileName + " in " + duration + " ms\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            Files.writeString(Path.of(downloadDir, "download_stats.txt"), "Downloaded: " + destination.getFileName() + " in " + duration + " ms\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         }
     }
 
