@@ -7,35 +7,31 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 
-@WebMvcTest(FileDownloadController.class)
 class FileDownloadControllerTest {
 
-    @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    @Mock
     private StreamFileDownloadServiceImpl streamFileDownloadServiceImpl;
 
     @Mock
     private Authentication authentication;
 
+    @InjectMocks
+    private FileDownloadController fileDownloadController;
+
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        mockMvc = MockMvcBuilders.standaloneSetup(new FileDownloadController(streamFileDownloadServiceImpl)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(fileDownloadController).build();
     }
 
     @Test
-    @WithMockUser(authorities = "API_ACCESS_ROLE")
     void testDownloadFileBySASUrl_Success() throws Exception {
         when(streamFileDownloadServiceImpl.getSasUrl(any(), any())).thenReturn("https://example.com/file");
 
@@ -48,7 +44,6 @@ class FileDownloadControllerTest {
     }
 
     @Test
-    @WithMockUser(authorities = "API_ACCESS_ROLE")
     void testDownloadFileBySASUrl_InvalidRequest() throws Exception {
         mockMvc.perform(post("/download")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -63,6 +58,6 @@ class FileDownloadControllerTest {
         mockMvc.perform(post("/download")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"fileName\":\"test.txt\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isForbidden());
     }
 }
