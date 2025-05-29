@@ -85,3 +85,78 @@ public class BBGServiceImpl {
         return response.body();
     }
 }
+
+==========
+
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+
+import java.net.InetSocketAddress;
+import java.net.ProxySelector;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
+public class BBGServiceImpl {
+
+    private final String proxyHost = "your.proxy.host";
+    private final int proxyPort = 8080;
+    private final String proxyUsername = "proxyuser";
+    private final String proxyPassword = "proxypass";
+
+    private final String cumu_bbg_username = "client_id";
+    private final String cumu_bbg_passcode = "client_secret";
+
+    public String requestAccessToken() {
+        String authHeader = createAuthHeaderString(cumu_bbg_username, cumu_bbg_passcode);
+
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("grant_type", "client_credentials");
+
+        WebClient webClient = getWebClientWithProxy();
+
+        return webClient.post()
+                .uri("https://bsso.blpprofessional.com/ext/api/as/token.oauth2")
+                .header(HttpHeaders.AUTHORIZATION, authHeader)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .bodyToMono(String.class)
+                .doOnNext(System.out::println)
+                .block(); // Blocking only for demo; prefer async in production
+    }
+
+    private WebClient getWebClientWithProxy() {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)))
+                .authenticator(new java.net.Authenticator() {
+                    @Override
+                    protected java.net.PasswordAuthentication getPasswordAuthentication() {
+                        return new java.net.PasswordAuthentication(
+                                proxyUsername,
+                                proxyPassword.toCharArray()
+                        );
+                    }
+                })
+                .build();
+
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(
+                        io.netty.handler.ssl.SslContextBuilder.forClient().build(),
+                        HttpClient.from(httpClient)
+                ))
+                .build();
+    }
+
+    private String createAuthHeaderString(String username, String password) {
+        String auth = username + ":" + password;
+        return "Basic " + Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+    }
+}
+
