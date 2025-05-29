@@ -1,11 +1,7 @@
 import java.io.IOException;
 import java.net.*;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
 import java.net.http.*;
-import java.net.http.HttpClient.*;
-import java.net.http.HttpRequest.*;
-import java.util.*;
+import java.util.Base64;
 import com.fasterxml.jackson.databind.*;
 
 public class OAuthApiClient {
@@ -16,7 +12,7 @@ public class OAuthApiClient {
     private static final String API_URL = "https://api.xyz.com/eap/catalogs/";
     private static final String API_VERSION = "2";
 
-    // Proxy configuration
+    // Proxy config
     private static final boolean USE_PROXY = true;
     private static final String PROXY_HOST = "proxy.example.com";
     private static final int PROXY_PORT = 8080;
@@ -24,7 +20,6 @@ public class OAuthApiClient {
     private static final String PROXY_PASSWORD = "yourProxyPassword";
 
     public static void main(String[] args) throws Exception {
-        // Use TLS 1.2 explicitly if needed
         System.setProperty("https.protocols", "TLSv1.2");
 
         String token = fetchAccessToken();
@@ -32,7 +27,7 @@ public class OAuthApiClient {
         if (token != null) {
             callApiWithToken(token);
         } else {
-            System.err.println("Failed to obtain access token");
+            System.err.println("Failed to get access token");
         }
     }
 
@@ -42,19 +37,23 @@ public class OAuthApiClient {
 
         HttpClient client = createHttpClient();
 
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(OAUTH_URL))
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(BodyPublishers.ofString(form))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(form));
 
-        HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
+        // Add Proxy auth header if needed
+        if (USE_PROXY) {
+            requestBuilder.header("Proxy-Authorization", getBasicProxyAuthHeader());
+        }
+
+        HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() == 200) {
             ObjectMapper mapper = new ObjectMapper();
             return mapper.readTree(response.body()).get("access_token").asText();
         } else {
-            System.err.println("Error: " + response.statusCode() + " - " + response.body());
+            System.err.println("Auth API error " + response.statusCode() + ": " + response.body());
             return null;
         }
     }
@@ -62,32 +61,35 @@ public class OAuthApiClient {
     private static void callApiWithToken(String token) throws IOException, InterruptedException {
         HttpClient client = createHttpClient();
 
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(API_URL))
                 .header("Authorization", "Bearer " + token)
                 .header("api-version", API_VERSION)
-                .GET()
-                .build();
+                .GET();
 
-        HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
+        if (USE_PROXY) {
+            requestBuilder.header("Proxy-Authorization", getBasicProxyAuthHeader());
+        }
 
-        System.out.println("API Response Status: " + response.statusCode());
-        System.out.println("Response Body:\n" + response.body());
+        HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+
+        System.out.println("API Status: " + response.statusCode());
+        System.out.println("Body:\n" + response.body());
     }
 
     private static HttpClient createHttpClient() {
         HttpClient.Builder builder = HttpClient.newBuilder();
 
         if (USE_PROXY) {
-            builder.proxy(ProxySelector.of(new InetSocketAddress(PROXY_HOST, PROXY_PORT)))
-                   .authenticator(new Authenticator() {
-                       @Override
-                       protected PasswordAuthentication getPasswordAuthentication() {
-                           return new PasswordAuthentication(PROXY_USERNAME, PROXY_PASSWORD.toCharArray());
-                       }
-                   });
+            builder.proxy(ProxySelector.of(new InetSocketAddress(PROXY_HOST, PROXY_PORT)));
         }
 
         return builder.build();
+    }
+
+    private static String getBasicProxyAuthHeader() {
+        String auth = PROXY_USERNAME + ":" + PROXY_PASSWORD;
+        String encoded = Base64.getEncoder().encodeToString(auth.getBytes());
+        return "Basic " + encoded;
     }
 }
