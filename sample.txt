@@ -1,72 +1,87 @@
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.ClientResponse;
-import reactor.core.publisher.Mono;
+public class BBGServiceImpl {
 
-import java.util.Map;
+    public String requestAccessToken() throws Exception {
+        RestTemplate restTemplate = getRestTemplate();
 
-public class BloombergClient {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        headers.set("Authorization", createAuthHeaderString(cumu_bbg_username, cumu_bbg_passcode));
 
-    private static final String CLIENT_ID = System.getenv("BLOOMBERG_DL_CLIENT_ID");
-    private static final String CLIENT_SECRET = System.getenv("BLOOMBERG_DL_CLIENT_SECRET");
+        MultiValueMap<String, String> map = new LinkedMultiValueMap<>();
+        map.add("grant_type", "client_credentials");
 
-    private static final String TOKEN_URL = "https://bsso.blpprofessional.com/ext/api/as/token.oauth2";
-    private static final String HOST = "https://api.bloomberg.com";
-    private static final String CATALOGS_ENDPOINT = "/eap/catalogs/";
+        HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(map, headers);
 
-    private final WebClient webClient;
+        ResponseEntity<String> response = restTemplate.exchange(
+            "https://bsso.blpprofessional.com/ext/api/as/token.oauth2",
+            HttpMethod.POST,
+            entity,
+            String.class
+        );
 
-    public BloombergClient() {
-        this.webClient = WebClient.builder()
-                .baseUrl(HOST)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .build();
+        System.out.println("Resp: " + response);
+        return response.toString();
     }
 
-    private String fetchToken() {
-        WebClient tokenClient = WebClient.builder()
-                .baseUrl(TOKEN_URL)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-                .build();
-
-        String body = "grant_type=client_credentials&client_id=" + CLIENT_ID + "&client_secret=" + CLIENT_SECRET;
-
-        Map<String, Object> response = tokenClient.post()
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .block();
-
-        if (response != null && response.containsKey("access_token")) {
-            return (String) response.get("access_token");
-        } else {
-            throw new RuntimeException("Failed to fetch access token: " + response);
-        }
+    private String createAuthHeaderString(String username, String password) {
+        String auth = username + ":" + password;
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.US_ASCII));
+        return "Basic " + encodedAuth;
     }
 
-    public void callCatalogsEndpoint() {
-        String token = fetchToken();
+    protected RestTemplate getRestTemplate() throws Exception {
+        var template = new RestTemplate();
 
-        ClientResponse response = webClient.get()
-                .uri(CATALOGS_ENDPOINT)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                .header("api-version", "2")
-                .exchange()
-                .block();
+        var credsProvider = new BasicCredentialsProvider();
+        var cookieStore = new BasicCookieStore();
+        credsProvider.setCredentials(
+            new AuthScope(proxyHost, proxyPort),
+            new UsernamePasswordCredentials(proxyUsername, proxyPassword.toCharArray())
+        );
 
-        if (response != null) {
-            System.out.println("Status Code: " + response.statusCode().value());
+        var clientBuilder = HttpClientBuilder.create();
+        clientBuilder.useSystemProperties();
+        clientBuilder.setProxy(new HttpHost(proxyHost, proxyPort));
+        clientBuilder.setDefaultCredentialsProvider(credsProvider);
+        clientBuilder.setProxyAuthenticationStrategy(new ProxyAuthenticationStrategy());
+        clientBuilder.disableRedirectHandling();
+        clientBuilder.setDefaultCookieStore(cookieStore);
 
-            String json = response.bodyToMono(String.class).block();
-            System.out.println(json);
-        } else {
-            System.out.println("No response from server.");
-        }
+        var client = clientBuilder.build();
+        var factory = new HttpComponentsClientHttpRequestFactory(client);
+        template.setRequestFactory(factory);
+
+        return template;
     }
+}
 
-    public static void main(String[] args) {
-        BloombergClient client = new BloombergClient();
-        client.callCatalogsEndpoint();
+============== 
+
+public class BBGServiceImpl {
+
+    public String requestAccessToken() throws IOException, InterruptedException {
+        String auth = Base64.getEncoder().encodeToString((cumu_bbg_username + ":" + cumu_bbg_passcode).getBytes(StandardCharsets.US_ASCII));
+        String body = "grant_type=client_credentials";
+
+        HttpClient client = HttpClient.newBuilder()
+            .proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)))
+            .authenticator(new Authenticator() {
+                @Override
+                protected PasswordAuthentication getPasswordAuthentication() {
+                    return new PasswordAuthentication(proxyUsername, proxyPassword.toCharArray());
+                }
+            })
+            .build();
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create("https://bsso.blpprofessional.com/ext/api/as/token.oauth2"))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Authorization", "Basic " + auth)
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        System.out.println("Resp: " + response.body());
+        return response.body();
     }
 }
