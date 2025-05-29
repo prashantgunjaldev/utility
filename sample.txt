@@ -1,0 +1,80 @@
+import java.io.IOException;
+import java.net.*;
+import java.net.http.*;
+import java.net.http.HttpClient.*;
+import java.net.http.HttpRequest.*;
+import java.util.*;
+import com.fasterxml.jackson.databind.*;
+
+public class OAuthApiClient {
+
+    private static final String OAUTH_URL = "https://xyz.com/ext/api/as/token.oauth2";
+    private static final String CLIENT_ID = "********************";
+    private static final String CLIENT_SECRET = "******************************";
+    private static final String API_URL = "https://api.xyz.com/eap/catalogs/";
+    private static final String API_VERSION = "2";
+
+    // Optional: Set proxy if needed
+    private static final boolean USE_PROXY = true;
+    private static final String PROXY_HOST = "proxy.example.com";
+    private static final int PROXY_PORT = 8080;
+
+    public static void main(String[] args) throws Exception {
+        String token = fetchAccessToken();
+
+        if (token != null) {
+            callApiWithToken(token);
+        } else {
+            System.err.println("Failed to obtain access token");
+        }
+    }
+
+    private static String fetchAccessToken() throws IOException, InterruptedException {
+        String form = "grant_type=client_credentials&client_id=" + URLEncoder.encode(CLIENT_ID, "UTF-8") +
+                      "&client_secret=" + URLEncoder.encode(CLIENT_SECRET, "UTF-8");
+
+        HttpClient client = createHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(OAUTH_URL))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(BodyPublishers.ofString(form))
+                .build();
+
+        HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
+
+        if (response.statusCode() == 200) {
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.readTree(response.body()).get("access_token").asText();
+        } else {
+            System.err.println("Error: " + response.statusCode() + " - " + response.body());
+            return null;
+        }
+    }
+
+    private static void callApiWithToken(String token) throws IOException, InterruptedException {
+        HttpClient client = createHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(API_URL))
+                .header("Authorization", "Bearer " + token)
+                .header("api-version", API_VERSION)
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
+
+        System.out.println("API Response Status: " + response.statusCode());
+        System.out.println("Response Body:\n" + response.body());
+    }
+
+    private static HttpClient createHttpClient() {
+        HttpClient.Builder builder = HttpClient.newBuilder();
+
+        if (USE_PROXY) {
+            builder.proxy(ProxySelector.of(new InetSocketAddress(PROXY_HOST, PROXY_PORT)));
+        }
+
+        return builder.build();
+    }
+}
