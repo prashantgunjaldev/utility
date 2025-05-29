@@ -1,5 +1,7 @@
 import java.io.IOException;
 import java.net.*;
+import java.net.Authenticator;
+import java.net.PasswordAuthentication;
 import java.net.http.*;
 import java.net.http.HttpClient.*;
 import java.net.http.HttpRequest.*;
@@ -14,12 +16,17 @@ public class OAuthApiClient {
     private static final String API_URL = "https://api.xyz.com/eap/catalogs/";
     private static final String API_VERSION = "2";
 
-    // Optional: Set proxy if needed
+    // Proxy configuration
     private static final boolean USE_PROXY = true;
     private static final String PROXY_HOST = "proxy.example.com";
     private static final int PROXY_PORT = 8080;
+    private static final String PROXY_USERNAME = "yourProxyUsername";
+    private static final String PROXY_PASSWORD = "yourProxyPassword";
 
     public static void main(String[] args) throws Exception {
+        // Use TLS 1.2 explicitly if needed
+        System.setProperty("https.protocols", "TLSv1.2");
+
         String token = fetchAccessToken();
 
         if (token != null) {
@@ -72,7 +79,13 @@ public class OAuthApiClient {
         HttpClient.Builder builder = HttpClient.newBuilder();
 
         if (USE_PROXY) {
-            builder.proxy(ProxySelector.of(new InetSocketAddress(PROXY_HOST, PROXY_PORT)));
+            builder.proxy(ProxySelector.of(new InetSocketAddress(PROXY_HOST, PROXY_PORT)))
+                   .authenticator(new Authenticator() {
+                       @Override
+                       protected PasswordAuthentication getPasswordAuthentication() {
+                           return new PasswordAuthentication(PROXY_USERNAME, PROXY_PASSWORD.toCharArray());
+                       }
+                   });
         }
 
         return builder.build();
