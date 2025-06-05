@@ -1,3 +1,21 @@
+kubectl patch deployment <deployment-name> `
+  -n <namespace> `
+  --type='json' `
+  -p '[{
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/env/-",
+    "value": {
+      "name": "PASS_A",
+      "valueFrom": {
+        "secretKeyRef": {
+          "name": "your-azure-kv-synced-secret-name",
+          "key": "PASS_NEW"
+        }
+      }
+    }
+  }]'
+==================
+
 kubectl get deployment <deployment-name> -n <namespace> -o jsonpath='{.spec.template.spec.containers[*].name}'
 
 kubectl patch deployment <deployment-name> \
