@@ -1,3 +1,10 @@
+kubectl patch deployment cumu-distribution-hub-service `
+  -n cumu-services `
+  --type='json' `
+  -p '[{"op": "replace", "path": "/spec/template/spec/containers/0/env/0/value", "value": "jdbc:postgresql://NEW-HOST:5432/dbname"}]'
+
+============
+
 kubectl patch deployment <deployment-name> `
   -n <namespace> `
   --type='json' `
