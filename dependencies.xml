@@ -1,0 +1,57 @@
+<dependencies>
+        <!-- Spring Boot WebFlux Starter for reactive web applications -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- Spring Boot Starter Data R2DBC for reactive database access -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+        </dependency>
+
+        <!-- R2DBC Driver for PostgreSQL -->
+        <dependency>
+            <groupId>io.r2dbc</groupId>
+            <artifactId>r2dbc-postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Jackson for JSON serialization/deserialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Azure Storage Blob SDK for interacting with Azure Blob Storage -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-storage-blob</artifactId>
+            <version>12.26.0</version> <!-- Use a recent stable version -->
+        </dependency>
+
+        <!-- Spring Boot Test Starter for testing -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Reactor Test for testing reactive components -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- For @PostConstruct (javax.annotation.PostConstruct was moved to jakarta.annotation in Jakarta EE 9) -->
+        <!-- Spring Boot 3.x typically handles this via Jakarta EE dependencies indirectly, but explicitly adding it
+             can resolve issues if not all transitive dependencies bring it. -->
+        <!-- <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <version>2.1.1</version>
+        </dependency> -->
+
+    </dependencies>
