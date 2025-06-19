@@ -7,85 +7,70 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
-import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class SSEPollingService {
 
     private final WebClient webClient;
-    private final AtomicReference<String> jwtToken = new AtomicReference<>("initial-token");
+    private final TokenService tokenService;
 
-    private final Duration pollInterval = Duration.ofSeconds(10);  // Configurable delay between polls
-    private final Duration initialDelay = Duration.ofSeconds(10); // Start 10 seconds after app boot
+    private final Duration delayBetweenPolls = Duration.ofSeconds(10);
 
-    public SSEPollingService(WebClient.Builder webClientBuilder) {
+    public SSEPollingService(WebClient.Builder webClientBuilder, TokenService tokenService) {
         this.webClient = webClientBuilder
-                .baseUrl("https://your-api-host.com") // Replace with actual base URL
+                .baseUrl("https://your-api-host.com") // Replace with actual host
                 .build();
+        this.tokenService = tokenService;
     }
 
     @PostConstruct
     public void init() {
-        // Start after 10 seconds
-        Mono.delay(initialDelay)
-                .doOnNext(tick -> startPolling())
-                .subscribe();
+        // Start the polling sequence after app startup
+        startPolling();
     }
 
-    private void startPolling() {
-        System.out.println("[SSEPollingService] Started polling loop...");
-
-        Flux.interval(Duration.ZERO, pollInterval)
-                .flatMap(tick -> pollSSEEndpoint()
-                        .onErrorResume(ex -> {
-                            System.err.println("[SSEPollingService] Error during poll: " + ex.getMessage());
-                            return Flux.empty(); // Continue polling on error
-                        }))
-                .retry() // Infinite retry in case the Flux fails entirely
+    public void startPolling() {
+        Flux.defer(this::pollSSEOnce)
+                .repeatWhen(completed -> completed.delayElements(delayBetweenPolls)) // Wait 10s after each poll
                 .subscribeOn(Schedulers.boundedElastic())
-                .subscribe(this::handleSseEvent, error -> {
-                    System.err.println("[SSEPollingService] Fatal error: " + error.getMessage());
-                });
+                .subscribe(
+                        this::handleSseEvent,
+                        error -> System.err.println("[SSEPollingService] Stream terminated due to error: " + error.getMessage())
+                );
     }
 
-    private Flux<String> pollSSEEndpoint() {
-        return webClient.get()
-                .uri("/your/sse/endpoint") // Replace with actual SSE endpoint
-                .accept(MediaType.TEXT_EVENT_STREAM)
-                .header("Authorization", "Bearer " + jwtToken.get())
-                .retrieve()
-                .bodyToFlux(String.class)
+    private Flux<String> pollSSEOnce() {
+        System.out.println("[SSEPollingService] Making API call...");
+
+        return tokenService.getToken()
+                .flatMapMany(token -> webClient.get()
+                        .uri("/your/sse/endpoint")
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .header("Authorization", "Bearer " + token)
+                        .retrieve()
+                        .onStatus(status -> status.value() == 401,
+                                response -> Mono.error(new RuntimeException("401 Unauthorized")))
+                        .bodyToFlux(String.class)
+                        .doOnComplete(() -> System.out.println("[SSEPollingService] Got response, waiting 10s..."))
+                        .doOnNext(data -> System.out.println("[SSEPollingService] Received: " + data))
+                )
                 .onErrorResume(ex -> {
-                    if (isTokenExpired(ex)) {
-                        System.out.println("[SSEPollingService] Token expired, refreshing...");
-                        return refreshToken()
-                                .flatMapMany(newToken -> {
-                                    jwtToken.set(newToken);
-                                    return pollSSEEndpoint(); // Retry once with new token
-                                });
+                    if (isUnauthorized(ex)) {
+                        System.out.println("[SSEPollingService] 401 detected, refreshing token and retrying...");
+                        return tokenService.refreshToken()
+                                .thenMany(pollSSEOnce()); // Retry after refresh
                     }
-                    return Flux.error(ex);
+                    System.err.println("[SSEPollingService] Error occurred: " + ex.getMessage());
+                    return Flux.empty(); // Ignore error and continue loop
                 });
     }
 
-    private boolean isTokenExpired(Throwable ex) {
+    private boolean isUnauthorized(Throwable ex) {
         return ex.getMessage() != null && ex.getMessage().contains("401");
     }
 
-    private Mono<String> refreshToken() {
-        return webClient.post()
-                .uri("/auth/refresh") // Replace with your actual refresh endpoint
-                .retrieve()
-                .bodyToMono(String.class)
-                .doOnNext(token -> System.out.println("[SSEPollingService] Token refreshed"))
-                .onErrorResume(e -> {
-                    System.err.println("[SSEPollingService] Token refresh failed: " + e.getMessage());
-                    return Mono.error(new RuntimeException("Token refresh failed", e));
-                });
-    }
-
     private void handleSseEvent(String eventData) {
-        System.out.println("[SSEPollingService] Received SSE event: " + eventData);
-        // Replace this with actual event processing logic
+        // Custom processing
+        System.out.println("[SSEPollingService] Processed Event: " + eventData);
     }
 }
