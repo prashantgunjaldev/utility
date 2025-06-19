@@ -1,34 +1,133 @@
-private Flux<String> pollSSEOnce() {
-    System.out.println("[SSEPollingService] Making API call...");
+===
+import org.springframework.stereotype.Service;
 
-    return tokenService.getToken()
-            .flatMapMany(token -> webClient.get()
-                    .uri("/your/sse/endpoint")
-                    .accept(MediaType.TEXT_EVENT_STREAM)
-                    .header("Authorization", "Bearer " + token)
-                    .exchangeToFlux(response -> {
-                        if (response.statusCode().value() == 401) {
-                            return Flux.error(new RuntimeException("401 Unauthorized"));
-                        }
+@Service
+public class EventHandlerService {
 
-                        // ✅ Log response headers
-                        System.out.println("[SSEPollingService] Response Headers:");
-                        response.headers().asHttpHeaders().forEach((key, value) ->
-                                System.out.println("  " + key + ": " + value)
-                        );
+    private final DownloadQueueService queueService;
 
-                        return response.bodyToFlux(String.class)
-                                .doOnComplete(() -> System.out.println("[SSEPollingService] Got response, waiting 10s..."))
-                                .doOnNext(data -> System.out.println("[SSEPollingService] Received: " + data));
-                    })
-            )
-            .onErrorResume(ex -> {
-                if (isUnauthorized(ex)) {
-                    System.out.println("[SSEPollingService] 401 detected, refreshing token and retrying...");
-                    return tokenService.refreshToken()
-                            .thenMany(pollSSEOnce()); // Retry after refresh
-                }
-                System.err.println("[SSEPollingService] Error occurred: " + ex.getMessage());
-                return Flux.empty(); // Continue loop even if error
-            });
+    public EventHandlerService(DownloadQueueService queueService) {
+        this.queueService = queueService;
+    }
+
+    public void handleEvent(String eventJson) {
+        // Extract fileUrl & blobName from JSON
+        String fileUrl = extractUrlFromEvent(eventJson);
+        String blobName = extractBlobNameFromEvent(eventJson);
+
+        System.out.println("[EventHandler] Scheduling download: " + blobName);
+        queueService.submitDownload(fileUrl, blobName);
+    }
+
+    private String extractUrlFromEvent(String json) {
+        // Replace with actual parsing logic (e.g. Jackson or org.json)
+        return json.contains("url") ? json.split("url\":\"")[1].split("\"")[0] : "";
+    }
+
+    private String extractBlobNameFromEvent(String json) {
+        return "file-" + System.currentTimeMillis(); // customize as needed
+    }
+}
+
+======
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
+
+@Service
+public class DownloadQueueService {
+
+    private final FileDownloaderService downloaderService;
+    private final Semaphore downloadSlots;
+    private final Queue<DownloadTask> queue = new ConcurrentLinkedQueue<>();
+
+    private static final int MAX_PARALLEL_DOWNLOADS = 3;
+
+    public DownloadQueueService(FileDownloaderService downloaderService) {
+        this.downloaderService = downloaderService;
+        this.downloadSlots = new Semaphore(MAX_PARALLEL_DOWNLOADS);
+    }
+
+    public void submitDownload(String fileUrl, String blobName) {
+        queue.offer(new DownloadTask(fileUrl, blobName));
+        processQueue();
+    }
+
+    private void processQueue() {
+        if (downloadSlots.tryAcquire()) {
+            DownloadTask task = queue.poll();
+            if (task != null) {
+                downloaderService.downloadToBlob(task.fileUrl, task.connectionString, task.container, task.blobName)
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .doFinally(signal -> {
+                            downloadSlots.release();
+                            processQueue(); // trigger next item after current finishes
+                        })
+                        .subscribe();
+            } else {
+                downloadSlots.release(); // nothing to do
+            }
+        }
+    }
+
+    private static class DownloadTask {
+        String fileUrl, blobName;
+        String container = "your-container";
+        String connectionString = "<your-conn-string>"; // move to config
+        public DownloadTask(String fileUrl, String blobName) {
+            this.fileUrl = fileUrl;
+            this.blobName = blobName;
+        }
+    }
+}
+
+==============
+@Service
+public class FileDownloaderService {
+    private final WebClient webClient;
+
+    public FileDownloaderService(WebClient.Builder builder) {
+        this.webClient = builder.build();
+    }
+
+    public Mono<Void> downloadToBlob(String fileUrl, String connectionString, String container, String blobName) {
+        return Mono.fromRunnable(() -> {
+            System.out.println("[Downloader] Starting: " + blobName);
+
+            BlockBlobClient blobClient = new BlobClientBuilder()
+                    .connectionString(connectionString)
+                    .containerName(container)
+                    .blobName(blobName)
+                    .buildClient()
+                    .getBlockBlobClient();
+
+            try (BlobOutputStream out = blobClient.getBlobOutputStream()) {
+                webClient.get()
+                        .uri(URI.create(fileUrl))
+                        .retrieve()
+                        .bodyToFlux(DataBuffer.class)
+                        .doOnNext(buffer -> {
+                            buffer.readableByteBuffers().forEach(bb -> {
+                                byte[] bytes = new byte[bb.remaining()];
+                                bb.get(bytes);
+                                try {
+                                    out.write(bytes);
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            });
+                            DataBufferUtils.release(buffer);
+                        })
+                        .blockLast();
+                out.flush();
+                System.out.println("[Downloader] Completed: " + blobName);
+            } catch (Exception e) {
+                System.err.println("[Downloader] Failed " + blobName + ": " + e.getMessage());
+            }
+        });
+    }
 }
