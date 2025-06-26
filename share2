@@ -1,3 +1,16 @@
+public static int getPodOrdinal() {
+        String hostname = System.getenv("HOSTNAME");  // e.g. my-app-0
+        if (hostname != null && hostname.contains("-")) {
+            try {
+                String[] parts = hostname.split("-");
+                return Integer.parseInt(parts[parts.length - 1]);
+            } catch (NumberFormatException e) {
+                System.err.println("Failed to parse pod ordinal from hostname: " + hostname);
+            }
+        }
+        return -1; // Unknown or error
+    }
+
 import org.springframework.cloud.kubernetes.commons.leader.Candidate;
 
 public class LeaderElectionCandidate implements Candidate {
