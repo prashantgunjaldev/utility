@@ -20,33 +20,72 @@ spring.cloud.kubernetes.leader.name=my-leader-election
 spring.cloud.kubernetes.leader.namespace=default
 
 =======
-import org.springframework.cloud.kubernetes.commons.leader.event.LeaderInitiatedEvent;
-import org.springframework.context.event.EventListener;
+import jakarta.annotation.PreDestroy;
+import org.springframework.cloud.kubernetes.commons.leader.LeaderInitiator;
 import org.springframework.stereotype.Component;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
-public class LeaderElectionListener {
+public class LeaderTaskExecutor {
 
-    private volatile boolean isLeader = false;
+    private final AtomicBoolean isLeader = new AtomicBoolean(false);
 
-    @EventListener
-    public void onLeader(LeaderInitiatedEvent event) {
-        if (event.isLeader()) {
-            System.out.println("🚀 This pod is now the LEADER.");
-            isLeader = true;
-            startLeaderOnlyTasks();
-        } else {
-            System.out.println("❌ This pod LOST leadership.");
-            isLeader = false;
-        }
+    public void onStartedLeading() {
+        isLeader.set(true);
+        System.out.println("✅ This pod is the LEADER!");
+        // Start leader-only jobs or orchestrations
+    }
+
+    public void onStoppedLeading() {
+        isLeader.set(false);
+        System.out.println("❌ Leadership lost!");
+        // Optionally stop leader-only tasks
     }
 
     public boolean isLeader() {
-        return isLeader;
+        return isLeader.get();
     }
 
-    private void startLeaderOnlyTasks() {
-        // trigger logic such as discovery, orchestration, etc.
+    @PreDestroy
+    public void onShutdown() {
+        // Clean up on shutdown
+        onStoppedLeading();
+    }
+}
+
+==
+
+import org.springframework.cloud.kubernetes.commons.leader.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class LeaderElectionConfig {
+
+    @Bean
+    public LeaderInitiator leaderInitiator(LeaderProperties leaderProperties,
+                                           LeaderTaskExecutor executor) {
+        return new LeaderInitiator(
+            ctx -> executor.onStartedLeading(),
+            executor::onStoppedLeading,
+            leaderProperties
+        );
+    }
+}
+
+@Service
+public class SomeService {
+
+    private final LeaderTaskExecutor executor;
+
+    public SomeService(LeaderTaskExecutor executor) {
+        this.executor = executor;
+    }
+
+    public void doWork() {
+        if (executor.isLeader()) {
+            System.out.println("🔁 Leader is doing the job...");
+        }
     }
 }
 
