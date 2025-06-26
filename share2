@@ -1,3 +1,61 @@
+import org.springframework.cloud.kubernetes.commons.leader.Candidate;
+
+public class LeaderElectionCandidate implements Candidate {
+
+    private final String id;
+    private final String role;
+    private final LeaderTaskExecutor executor;
+
+    public LeaderElectionCandidate(String id, String role, LeaderTaskExecutor executor) {
+        this.id = id;
+        this.role = role;
+        this.executor = executor;
+    }
+
+    @Override
+    public void onGranted(Context ctx) {
+        executor.onStartedLeading();
+    }
+
+    @Override
+    public void onRevoked(Context ctx) {
+        executor.onStoppedLeading();
+    }
+
+    @Override
+    public String getId() {
+        return id;
+    }
+
+    @Override
+    public String getRole() {
+        return role;
+    }
+}
+
+
+import org.springframework.cloud.kubernetes.commons.leader.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class LeaderInitiatorConfig {
+
+    @Bean
+    public LeaderInitiator leaderInitiator(LeaderProperties leaderProperties, LeaderTaskExecutor executor) {
+        String podName = System.getenv().getOrDefault("POD_NAME", UUID.randomUUID().toString());
+
+        Candidate candidate = new LeaderElectionCandidate(
+                podName,
+                leaderProperties.getName(), // role/lease name
+                executor
+        );
+
+        return new LeaderInitiator(candidate, leaderProperties);
+    }
+}
+===
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
