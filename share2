@@ -3,6 +3,34 @@
   <artifactId>spring-cloud-starter-kubernetes-fabric8</artifactId>
 </dependency>
 ----
+import org.springframework.cloud.kubernetes.commons.leader.LeaderLifecycle;
+import org.springframework.stereotype.Component;
+
+@Component
+public class MyLeaderLifecycle implements LeaderLifecycle {
+
+    private volatile boolean leader = false;
+
+    @Override
+    public void start() {
+        leader = true;
+        System.out.println("✅ This pod became LEADER!");
+        // start leader-only jobs
+    }
+
+    @Override
+    public void stop() {
+        leader = false;
+        System.out.println("❌ Leadership lost!");
+        // stop leader-only jobs
+    }
+
+    @Override
+    public boolean isRunning() {
+        return leader;
+    }
+}
+
 <dependencyManagement>
   <dependencies>
     <dependency>
