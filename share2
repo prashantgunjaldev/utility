@@ -1,0 +1,169 @@
+<dependency>
+  <groupId>org.springframework.cloud</groupId>
+  <artifactId>spring-cloud-starter-kubernetes-fabric8</artifactId>
+</dependency>
+----
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-dependencies</artifactId>
+      <version>2021.0.9</version> <!-- Compatible with Spring Boot 2.x -->
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+---
+spring.cloud.kubernetes.leader.enabled=true
+spring.cloud.kubernetes.leader.name=my-leader-election
+spring.cloud.kubernetes.leader.namespace=default
+
+=======
+import org.springframework.cloud.kubernetes.commons.leader.event.LeaderInitiatedEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Component;
+
+@Component
+public class LeaderElectionListener {
+
+    private volatile boolean isLeader = false;
+
+    @EventListener
+    public void onLeader(LeaderInitiatedEvent event) {
+        if (event.isLeader()) {
+            System.out.println("🚀 This pod is now the LEADER.");
+            isLeader = true;
+            startLeaderOnlyTasks();
+        } else {
+            System.out.println("❌ This pod LOST leadership.");
+            isLeader = false;
+        }
+    }
+
+    public boolean isLeader() {
+        return isLeader;
+    }
+
+    private void startLeaderOnlyTasks() {
+        // trigger logic such as discovery, orchestration, etc.
+    }
+}
+
+
+
+        ================ Get Task from Any pod =============
+Table
+        CREATE TABLE tasks (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  payload TEXT,
+  status VARCHAR(20) DEFAULT 'PENDING',
+  priority INT DEFAULT 0,
+  locked_by VARCHAR(50),
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+JPA Entity
+
+@Entity
+@Table(name = "tasks")
+public class Task {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String payload;
+    private String status;
+    private Integer priority;
+
+    @Column(name = "locked_by")
+    private String lockedBy;
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    // Getters & setters
+}
+
+
+## Repository 
+public interface TaskRepository extends JpaRepository<Task, Long> {
+
+    @Modifying
+    @Query(value = """
+        WITH cte AS (
+            SELECT id FROM tasks
+            WHERE status = 'PENDING'
+            ORDER BY priority DESC, created_at ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT :limit
+        )
+        UPDATE tasks
+        SET status = 'IN_PROGRESS',
+            locked_by = :lockedBy,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (SELECT id FROM cte)
+        RETURNING *;
+        """, nativeQuery = true)
+    List<Task> claimTasks(@Param("limit") int limit, @Param("lockedBy") String lockedBy);
+}
+
+
+##Polling service
+@Service
+public class TaskPollingService {
+
+    private final TaskRepository taskRepository;
+    private final String podId = System.getenv().getOrDefault("POD_NAME", UUID.randomUUID().toString());
+
+    public TaskPollingService(TaskRepository taskRepository) {
+        this.taskRepository = taskRepository;
+    }
+
+    @Transactional
+    public List<Task> claimNextTasks(int limit) {
+        return taskRepository.claimTasks(limit, podId);
+    }
+
+    public void processTask(Task task) {
+        // business logic here
+        System.out.printf("Pod %s processing task %d [priority=%d]%n", podId, task.getId(), task.getPriority());
+        // mark as done
+        task.setStatus("DONE");
+        task.setUpdatedAt(LocalDateTime.now());
+        taskRepository.save(task);
+    }
+}
+
+## Polling Runner
+
+@Component
+public class TaskPoller implements CommandLineRunner {
+
+    private final TaskPollingService pollingService;
+
+    public TaskPoller(TaskPollingService pollingService) {
+        this.pollingService = pollingService;
+    }
+
+    @Override
+    public void run(String... args) throws Exception {
+        Executors.newSingleThreadScheduledExecutor().scheduleWithFixedDelay(() -> {
+            try {
+                List<Task> tasks = pollingService.claimNextTasks(10);
+                for (Task task : tasks) {
+                    pollingService.processTask(task);
+                }
+                if (tasks.isEmpty()) {
+                    Thread.sleep(1000); // backoff
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }, 0, 3, TimeUnit.SECONDS);
+    }
+}
