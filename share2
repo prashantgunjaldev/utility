@@ -1,8 +1,48 @@
-<dependency>
-  <groupId>org.springframework.cloud</groupId>
-  <artifactId>spring-cloud-starter-kubernetes-fabric8</artifactId>
-</dependency>
-----
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.cloud.kubernetes.commons.leader.LeaderProperties;
+
+@Configuration
+public class LeaderPropertiesConfig {
+
+    @Bean
+    @ConfigurationProperties("spring.cloud.kubernetes.leader")
+    public LeaderProperties leaderProperties() {
+        return new LeaderProperties();
+    }
+}
+
+import jakarta.annotation.PreDestroy;
+import org.springframework.stereotype.Component;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+@Component
+public class LeaderTaskExecutor {
+
+    private final AtomicBoolean isLeader = new AtomicBoolean(false);
+
+    public void onStartedLeading() {
+        isLeader.set(true);
+        System.out.println("✅ This pod is the LEADER!");
+        // trigger leader-specific logic here
+    }
+
+    public void onStoppedLeading() {
+        isLeader.set(false);
+        System.out.println("❌ This pod LOST leadership.");
+    }
+
+    public boolean isLeader() {
+        return isLeader.get();
+    }
+
+    @PreDestroy
+    public void onShutdown() {
+        onStoppedLeading();
+    }
+}
+
 import org.springframework.cloud.kubernetes.commons.leader.LeaderInitiator;
 import org.springframework.cloud.kubernetes.commons.leader.LeaderProperties;
 import org.springframework.context.annotation.Bean;
@@ -21,88 +61,18 @@ public class LeaderInitiatorConfig {
     }
 }
 
-<dependencyManagement>
-  <dependencies>
-    <dependency>
-      <groupId>org.springframework.cloud</groupId>
-      <artifactId>spring-cloud-dependencies</artifactId>
-      <version>2021.0.9</version> <!-- Compatible with Spring Boot 2.x -->
-      <type>pom</type>
-      <scope>import</scope>
-    </dependency>
-  </dependencies>
-</dependencyManagement>
----
-spring.cloud.kubernetes.leader.enabled=true
-spring.cloud.kubernetes.leader.name=my-leader-election
-spring.cloud.kubernetes.leader.namespace=default
-
-=======
-import jakarta.annotation.PreDestroy;
-import org.springframework.cloud.kubernetes.commons.leader.LeaderInitiator;
-import org.springframework.stereotype.Component;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-@Component
-public class LeaderTaskExecutor {
-
-    private final AtomicBoolean isLeader = new AtomicBoolean(false);
-
-    public void onStartedLeading() {
-        isLeader.set(true);
-        System.out.println("✅ This pod is the LEADER!");
-        // Start leader-only jobs or orchestrations
-    }
-
-    public void onStoppedLeading() {
-        isLeader.set(false);
-        System.out.println("❌ Leadership lost!");
-        // Optionally stop leader-only tasks
-    }
-
-    public boolean isLeader() {
-        return isLeader.get();
-    }
-
-    @PreDestroy
-    public void onShutdown() {
-        // Clean up on shutdown
-        onStoppedLeading();
-    }
-}
-
-==
-
-import org.springframework.cloud.kubernetes.commons.leader.*;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-@Configuration
-public class LeaderElectionConfig {
-
-    @Bean
-    public LeaderInitiator leaderInitiator(LeaderProperties leaderProperties,
-                                           LeaderTaskExecutor executor) {
-        return new LeaderInitiator(
-            ctx -> executor.onStartedLeading(),
-            executor::onStoppedLeading,
-            leaderProperties
-        );
-    }
-}
-
 @Service
-public class SomeService {
+public class WorkDistributor {
 
-    private final LeaderTaskExecutor executor;
+    private final LeaderTaskExecutor leaderTaskExecutor;
 
-    public SomeService(LeaderTaskExecutor executor) {
-        this.executor = executor;
+    public WorkDistributor(LeaderTaskExecutor leaderTaskExecutor) {
+        this.leaderTaskExecutor = leaderTaskExecutor;
     }
 
-    public void doWork() {
-        if (executor.isLeader()) {
-            System.out.println("🔁 Leader is doing the job...");
+    public void maybeDistributeWork() {
+        if (leaderTaskExecutor.isLeader()) {
+            System.out.println("🚀 Running leader-only orchestration");
         }
     }
 }
