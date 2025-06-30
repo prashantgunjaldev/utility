@@ -1,3 +1,37 @@
+
+public void startParallelPolling() {
+        List<String> dlList = authService.getDlList(); // Get your list of DLs
+
+        // Determine the maximum concurrency, e.g., 50 streams
+        int maxConcurrency = Math.min(dlList.size(), 50);
+
+        Flux.fromIterable(dlList)
+            .parallel(maxConcurrency) // Process up to 'maxConcurrency' DLs in parallel
+            .runOn(Schedulers.boundedElastic()) // Use boundedElastic for I/O bound tasks
+            .flatMap(this::startPollingForDl) // For each DL, start its own polling process
+            .subscribe(
+                null, // No onNext handler needed here as individual streams handle events
+                error -> System.err.println("[SSEPollingService] Error in parallel polling: " + error.getMessage())
+            );
+    }
+
+    private Flux<String> startPollingForDl(String dl) {
+        System.out.println("[SSEPollingService] Starting polling for DL: " + dl);
+        return Flux.defer(() -> pollSSEOnce(dl))
+            .repeatWhen(Flux.longDeferred(() -> Flux.interval(Duration.ofMinutes(1)))
+                .doOnNext(l -> System.out.println("[SSEPollingService] Re-polling for DL: " + dl + " after " + l + " intervals"))) // Optional: Log re-polling
+            .subscribeOn(Schedulers.boundedElastic()) // Ensure each stream operates on its own thread
+            .doOnError(throwable -> System.err.println("[SSEPollingService] Stream error for DL " + dl + ": " + throwable.getMessage()))
+            .doOnNext(eventHandlerService::handleSseEvent) // Assuming handleSseEvent processes the event string
+            .doOnComplete(() -> System.out.println("[SSEPollingService] Polling completed for DL: " + dl))
+            .onErrorResume(e -> {
+                // Log and potentially retry or handle specific errors for this DL
+                System.err.println("[SSEPollingService] Error in stream for DL " + dl + ": " + e.getMessage());
+                // Depending on your requirements, you might want to return Flux.empty()
+                // or a delayed retry Flux here. For now, we just log and complete this stream.
+                return Flux.empty();
+            });
+    }
 ===
 import org.springframework.stereotype.Service;
 
