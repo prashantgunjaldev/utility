@@ -1,3 +1,42 @@
+@ExtendWith(MockitoExtension.class)
+class RequestTrackerControllerTest {
+
+    @Mock
+    private RequestTrackerService trackerService;
+
+    @InjectMocks
+    private RequestTrackerController requestTrackerController;
+
+    private MockMvc mockMvc;
+
+    @BeforeEach
+    void setUp() {
+        // Use apply(springSecurity()) to enable Spring Security testing features
+        // This sets up the SecurityContextHolder and allows @WithMockUser, etc., if needed
+        mockMvc = MockMvcBuilders.standaloneSetup(requestTrackerController)
+                .apply(SecurityMockMvcConfigurers.springSecurity()) // <--- Important: Enable Spring Security MockMvc support
+                .build();
+
+        // **Option 1: Programmatically set a mock Authentication (already in your code, but confirm it's effective)**
+        // This is usually sufficient for simple cases where you just need any authenticated user.
+        Authentication mockAuthentication = mock(Authentication.class);
+        when(mockAuthentication.getName()).thenReturn("testUser");
+        SecurityContextHolder.setContext(new SecurityContextImpl(mockAuthentication));
+
+        // **Option 2: (Alternative/More common for Spring Security tests) Using @WithMockUser**
+        // If you prefer, you can use @WithMockUser directly on your test methods.
+        // If you use @WithMockUser, you might not need the programmatic setup above in @BeforeEach
+        // unless you need a very specific mock beyond what @WithMockUser provides.
+        // Example:
+        // @Test
+        // @WithMockUser(username = "testUser", roles = {"USER"})
+        // void trackRequest_success() throws Exception { ... }
+    }
+
+    // ... (Your test methods remain the same) ...
+}
+====
+
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
