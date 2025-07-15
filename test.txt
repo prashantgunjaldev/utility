@@ -1,3 +1,18 @@
+@Configuration
+@EnableWebSecurity
+class TestSecurityConfig {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authz -> authz
+                .anyRequest().authenticated() // Allow any authenticated request
+            )
+            .csrf(csrf -> csrf.disable()); // Disable CSRF for easier testing, re-enable as needed for integration tests
+        return http.build();
+    }
+}
+==
+
 @ExtendWith(MockitoExtension.class)
 class RequestTrackerControllerTest {
 
