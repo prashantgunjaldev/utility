@@ -1,202 +1,43 @@
-@Configuration
-@EnableWebSecurity
-class TestSecurityConfig {
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-            .authorizeHttpRequests(authz -> authz
-                .anyRequest().authenticated() // Allow any authenticated request
-            )
-            .csrf(csrf -> csrf.disable()); // Disable CSRF for easier testing, re-enable as needed for integration tests
-        return http.build();
-    }
-}
-==
+package com.ubs.cumulus.bbg.service;
 
-@ExtendWith(MockitoExtension.class)
-class RequestTrackerControllerTest {
-
-    @Mock
-    private RequestTrackerService trackerService;
-
-    @InjectMocks
-    private RequestTrackerController requestTrackerController;
-
-    private MockMvc mockMvc;
-
-    @BeforeEach
-    void setUp() {
-        // Use apply(springSecurity()) to enable Spring Security testing features
-        // This sets up the SecurityContextHolder and allows @WithMockUser, etc., if needed
-        mockMvc = MockMvcBuilders.standaloneSetup(requestTrackerController)
-                .apply(SecurityMockMvcConfigurers.springSecurity()) // <--- Important: Enable Spring Security MockMvc support
-                .build();
-
-        // **Option 1: Programmatically set a mock Authentication (already in your code, but confirm it's effective)**
-        // This is usually sufficient for simple cases where you just need any authenticated user.
-        Authentication mockAuthentication = mock(Authentication.class);
-        when(mockAuthentication.getName()).thenReturn("testUser");
-        SecurityContextHolder.setContext(new SecurityContextImpl(mockAuthentication));
-
-        // **Option 2: (Alternative/More common for Spring Security tests) Using @WithMockUser**
-        // If you prefer, you can use @WithMockUser directly on your test methods.
-        // If you use @WithMockUser, you might not need the programmatic setup above in @BeforeEach
-        // unless you need a very specific mock beyond what @WithMockUser provides.
-        // Example:
-        // @Test
-        // @WithMockUser(username = "testUser", roles = {"USER"})
-        // void trackRequest_success() throws Exception { ... }
-    }
-
-    // ... (Your test methods remain the same) ...
-}
-====
-
-import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.hamcrest.Matchers.is;
-
-import org.junit.jupiter.api.BeforeEach;
+import com.ubs.cumulus.bbg.repository.PsrRequestLogRepository;
+import com.ubs.cumulus.bbg.entity.PsrRequestLogEntity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.context.SecurityContextImpl;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
-// Assuming these are your model classes
-class PsrRequestLogEntity {
-    private String id;
-    private String status;
-    // Add other fields as per your entity
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
-    // Constructor for convenience
-    public PsrRequestLogEntity(String id, String status) {
-        this.id = id;
-        this.status = status;
-    }
-}
-
-// Assuming this is your service interface/class
-interface RequestTrackerService {
-    List<PsrRequestLogEntity> trackById(String id);
-}
-
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class RequestTrackerControllerTest {
+class RequestTrackerServiceTest {
 
     @Mock
-    private RequestTrackerService trackerService;
+    private PsrRequestLogRepository requestLogRepository;
 
     @InjectMocks
-    private RequestTrackerController requestTrackerController;
-
-    private MockMvc mockMvc;
-
-    @BeforeEach
-    void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(requestTrackerController).build();
-        // Mock the SecurityContextHolder for the authentication object
-        Authentication mockAuthentication = mock(Authentication.class);
-        when(mockAuthentication.getName()).thenReturn("testUser");
-        SecurityContextHolder.setContext(new SecurityContextImpl(mockAuthentication));
-    }
+    private RequestTrackerService requestTrackerService;
 
     @Test
-    void trackRequest_success() throws Exception {
-        String requestId = "12345";
-        PsrRequestLogEntity entity1 = new PsrRequestLogEntity(requestId, "SUCCESS");
-        PsrRequestLogEntity entity2 = new PsrRequestLogEntity("67890", "PENDING"); // Example of another entity
-        List<PsrRequestLogEntity> mockResponse = Arrays.asList(entity1, entity2);
+    void testTrack_shouldReturnLogEntities() {
+        // Given
+        String id = "test-id";
+        PsrRequestLogEntity log1 = new PsrRequestLogEntity(); // You can set fields if needed
+        PsrRequestLogEntity log2 = new PsrRequestLogEntity();
+        List<PsrRequestLogEntity> mockLogs = Arrays.asList(log1, log2);
 
-        when(trackerService.trackById(requestId)).thenReturn(mockResponse);
+        when(requestLogRepository.trackRequest(id)).thenReturn(mockLogs);
 
-        mockMvc.perform(get("/v1/trackRequest")
-                .param("requestId", requestId)
-                .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id", is(requestId)))
-                .andExpect(jsonPath("$[0].status", is("SUCCESS")))
-                .andExpect(jsonPath("$[1].id", is("67890")))
-                .andExpect(jsonPath("$[1].status", is("PENDING")));
+        // When
+        List<PsrRequestLogEntity> result = requestTrackerService.track(id);
 
-        verify(trackerService, times(1)).trackById(requestId);
-    }
-
-    @Test
-    void trackRequest_notFound() throws Exception {
-        String requestId = "nonExistentId";
-
-        when(trackerService.trackById(requestId)).thenReturn(Collections.emptyList());
-
-        mockMvc.perform(get("/v1/trackRequest")
-                .param("requestId", requestId)
-                .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk()) // Controller returns 200 even if list is empty
-                .andExpect(jsonPath("$").isEmpty()); // Expecting an empty JSON array
-
-        verify(trackerService, times(1)).trackById(requestId);
-    }
-
-    @Test
-    void trackRequest_serviceThrowsException() throws Exception {
-        String requestId = "errorId";
-        String errorMessage = "Simulated internal server error";
-
-        when(trackerService.trackById(requestId)).thenThrow(new RuntimeException(errorMessage));
-
-        mockMvc.perform(get("/v1/trackRequest")
-                .param("requestId", requestId)
-                .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isInternalServerError()); // Assuming Spring handles uncaught exceptions as 500
-
-        verify(trackerService, times(1)).trackById(requestId);
-    }
-
-    @Test
-    void trackRequest_missingRequestIdParameter() throws Exception {
-        mockMvc.perform(get("/v1/trackRequest")
-                .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isBadRequest()); // Expecting 400 Bad Request for missing required parameter
-        
-        verifyNoInteractions(trackerService); // Ensure service method is not called
+        // Then
+        assertThat(result).hasSize(2).containsExactly(log1, log2);
+        verify(requestLogRepository, times(1)).trackRequest(id);
     }
 }
-
-
-
-====
-<dependencies>
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-test</artifactId>
-        <scope>test</scope>
-    </dependency>
-    <dependency>
-        <groupId>org.mockito</groupId>
-        <artifactId>mockito-junit-jupiter</artifactId>
-        <scope>test</scope>
-    </dependency>
-    <dependency>
-        <groupId>org.springframework.security</groupId>
-        <artifactId>spring-security-test</artifactId>
-        <scope>test</scope>
-    </dependency>
-</dependencies>
