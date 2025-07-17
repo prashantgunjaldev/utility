@@ -1,112 +1,122 @@
-@Test
-void testDownload_when4xx_shouldThrowException() {
-    // Mocks
-    WebClient.RequestHeadersUriSpec<?> uriSpec = mock(WebClient.RequestHeadersUriSpec.class);
-    WebClient.RequestHeadersSpec<?> headersSpec = mock(WebClient.RequestHeadersSpec.class);
-    WebClient.ResponseSpec responseSpec = mock(WebClient.ResponseSpec.class);
-    ClientResponse clientResponse = mock(ClientResponse.class);
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.*;
+import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.client.*;
+import reactor.core.publisher.*;
+import reactor.test.StepVerifier;
 
-    // Setup WebClient mock chain
-    when(webClient.get()).thenReturn(uriSpec);
-    when(uriSpec.uri(any())).thenReturn(headersSpec);
-    when(headersSpec.header(eq(HttpHeaders.AUTHORIZATION), anyString())).thenReturn(headersSpec);
-    when(headersSpec.header(eq("api-version"), anyString())).thenReturn(headersSpec);
-    when(headersSpec.accept(MediaType.APPLICATION_OCTET_STREAM)).thenReturn(headersSpec);
-    when(headersSpec.retrieve()).thenReturn(responseSpec);
+import java.time.Duration;
+import java.util.function.Function;
 
-    // Simulate onStatus match for 4xx
-    when(responseSpec.onStatus(any(), any())).thenAnswer(invocation -> {
-        Predicate<HttpStatus> predicate = invocation.getArgument(0);
-        Function<ClientResponse, Mono<? extends Throwable>> errorFunction = invocation.getArgument(1);
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-        // Return a new responseSpec that throws exception via onStatus
-        when(clientResponse.statusCode()).thenReturn(HttpStatus.BAD_REQUEST);
-        when(clientResponse.bodyToMono(String.class)).thenReturn(Mono.just("Bad Request"));
-
-        return WebClient.ResponseSpec.class.cast(
-            new WebClient.ResponseSpec() {
-                @Override
-                public <T> Mono<T> bodyToMono(Class<T> aClass) {
-                    return Mono.error(new RuntimeException("Failed to download from blob: 400 BAD_REQUEST"));
-                }
-
-                @Override
-                public <T> Flux<T> bodyToFlux(Class<T> aClass) {
-                    return Flux.error(new RuntimeException("Failed to download from blob: 400 BAD_REQUEST"));
-                }
-
-                @Override
-                public Mono<ResponseEntity<Void>> toBodilessEntity() {
-                    return Mono.empty();
-                }
-            }
-        );
-    });
-
-    // Token mock
-    when(authService.getToken("dl")).thenReturn("mock-token");
-
-    // Act & Assert
-    assertThatThrownBy(() -> service.download("http://fake-url", "dl").blockFirst())
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Failed to download from blob: 400");
-}
-
-
-====
 @ExtendWith(MockitoExtension.class)
-class BbgSseEventHandlerServiceTest {
+class BbgSseListenerServiceTest {
 
-    @Mock
-    private DownloadTaskRepository taskRepository;
-
-    @Mock
-    private PsrRequestLogRepository logRepository;
+    @Mock private WebClient webClient;
+    @Mock private WebClient.RequestHeadersUriSpec<?> uriSpec;
+    @Mock private WebClient.RequestHeadersSpec<?> headersSpec;
+    @Mock private BbgAuthService authService;
+    @Mock private BbgSseEventHandlerService eventHandlerService;
 
     @InjectMocks
-    private BbgSseEventHandlerService handlerService;
+    private BbgSseListenerService listenerService;
+
+    private final String apiUrl = "https://api.bloomberg.com/eap/notifications/sse";
+
+    @BeforeEach
+    void setup() {
+        MockitoAnnotations.openMocks(this);
+        listenerService.apiUrl = apiUrl;
+        listenerService.hostname = "host1";
+        listenerService.initialDelay = 1;
+        listenerService.pollInterval = 5;
+    }
 
     @Test
-    void shouldHandleSseEventAndSaveTask() {
-        // Given
-        String requestId = "12345";
-        String fileName = "sample-file.csv";
-        String downloadUrl = "https://example.com/download";
-        String vendor = "VENDOR_1";
+    void testPollSSEOnceSuccess() {
+        String dl = "DL123";
+        String token = "mock-token";
+        String sseData = "mock-data";
 
-        // Construct valid JSON
-        String eventData = """
-        {
-            "@type": "DistributionPublishedActivity",
-            "generated": {
-                "@type": "Distribution",
-                "snapshot": {
-                    "dataset": {
-                        "identifier": "%s"
-                    }
-                },
-                "url": "%s",
-                "name": "%s",
-                "qid": "%s"
-            }
-        }
-        """.formatted(requestId, downloadUrl, fileName, requestId);
+        when(authService.getTokenWithNonBlocking(eq(dl), eq(false)))
+                .thenReturn(Mono.just(token));
 
-        // When
-        Mockito.when(logRepository.getPsrRequestLogEntityByRequestId(requestId)).thenReturn(new PsrRequestLogEntity());
+        when(webClient.get()).thenReturn(uriSpec);
+        when(uriSpec.uri(apiUrl)).thenReturn(headersSpec);
+        when(headersSpec.accept(MediaType.APPLICATION_JSON)).thenReturn(headersSpec);
+        when(headersSpec.header(eq("Authorization"), anyString())).thenReturn(headersSpec);
+        when(headersSpec.header(eq("Last-Event-Id"), anyString())).thenReturn(headersSpec);
+        when(headersSpec.exchangeToFlux(any()))
+                .thenAnswer(invocation -> {
+                    Function<ClientResponse, Publisher<String>> transformer = invocation.getArgument(0);
+                    return Flux.just(sseData);
+                });
 
-        // Then
-        handlerService.handleSseEvent(eventData, vendor);
+        doNothing().when(eventHandlerService).handleSseEvent(eq(sseData), eq(dl));
 
-        // Verify task saved
-        ArgumentCaptor<DownloadTaskEntity> captor = ArgumentCaptor.forClass(DownloadTaskEntity.class);
-        Mockito.verify(taskRepository).save(captor.capture());
+        StepVerifier.create(listenerService.pollSSEOnce(dl, 1))
+                .expectNext(sseData)
+                .verifyComplete();
 
-        DownloadTaskEntity savedTask = captor.getValue();
-        assertEquals(requestId, savedTask.getRequestId());
-        assertEquals(downloadUrl, savedTask.getUrl());
-        assertEquals(fileName, savedTask.getFileName());
-        assertEquals("PENDING", savedTask.getStatus());
-        assertEquals(vendor, savedTask.getVendorAccount());
+        verify(eventHandlerService, times(1)).handleSseEvent(sseData, dl);
+    }
+
+    @Test
+    void testPollSSEOnce401UnauthorizedTriggersRetry() {
+        String dl = "DL401";
+
+        when(authService.getTokenWithNonBlocking(eq(dl), eq(false)))
+                .thenReturn(Mono.just("invalid-token"));
+
+        when(webClient.get()).thenReturn(uriSpec);
+        when(uriSpec.uri(apiUrl)).thenReturn(headersSpec);
+        when(headersSpec.accept(MediaType.APPLICATION_JSON)).thenReturn(headersSpec);
+        when(headersSpec.header(eq("Authorization"), anyString())).thenReturn(headersSpec);
+        when(headersSpec.header(eq("Last-Event-Id"), anyString())).thenReturn(headersSpec);
+        when(headersSpec.exchangeToFlux(any()))
+                .thenAnswer(invocation -> {
+                    Function<ClientResponse, Publisher<String>> transformer = invocation.getArgument(0);
+                    return transformer.apply(ClientResponse.create(401).build());
+                });
+
+        StepVerifier.withVirtualTime(() -> listenerService.pollSSEOnce(dl, 1))
+                .expectSubscription()
+                .thenAwait(Duration.ofSeconds(1))
+                .expectNextCount(0)
+                .verifyComplete();
+    }
+
+    @Test
+    void testPollSSEOnceErrorHandledGracefully() {
+        String dl = "DL500";
+
+        when(authService.getTokenWithNonBlocking(eq(dl), eq(false)))
+                .thenReturn(Mono.error(new RuntimeException("Token error")));
+
+        StepVerifier.create(listenerService.pollSSEOnce(dl, 1))
+                .verifyComplete();
+    }
+
+    @Test
+    void testExponentialBackoffDelay() {
+        int attempt1 = 1;
+        int attempt2 = 2;
+        int attempt3 = 3;
+
+        Assertions.assertEquals(1, listenerService.calculateDelay(attempt1));
+        Assertions.assertEquals(2, listenerService.calculateDelay(attempt2));
+        Assertions.assertEquals(3, listenerService.calculateDelay(attempt3));
+    }
+
+    @Test
+    void testShutdownFlagTerminatesPolling() {
+        String dl = "DLShutdown";
+        listenerService.setShutdown(true);
+
+        StepVerifier.create(listenerService.pollSSEOnce(dl, 1))
+                .verifyComplete();
     }
 }
