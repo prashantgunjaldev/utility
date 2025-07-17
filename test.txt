@@ -1,127 +1,112 @@
-package com.ubs.cumulus.bbg.psr.download;
+@Test
+void testDownload_when4xx_shouldThrowException() {
+    // Mocks
+    WebClient.RequestHeadersUriSpec<?> uriSpec = mock(WebClient.RequestHeadersUriSpec.class);
+    WebClient.RequestHeadersSpec<?> headersSpec = mock(WebClient.RequestHeadersSpec.class);
+    WebClient.ResponseSpec responseSpec = mock(WebClient.ResponseSpec.class);
+    ClientResponse clientResponse = mock(ClientResponse.class);
 
-import com.ubs.cumulus.bbg.client.BbgAuthService;
-import com.ubs.cumulus.bbg.client.BlobServiceClient;
-import com.ubs.cumulus.bbg.kafka.EdfKafkaEventService;
-import com.ubs.cumulus.bbg.model.DownloadInfo;
-import com.ubs.cumulus.bbg.model.RequestStatus;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.*;
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DefaultDataBufferFactory;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.web.reactive.function.client.*;
+    // Setup WebClient mock chain
+    when(webClient.get()).thenReturn(uriSpec);
+    when(uriSpec.uri(any())).thenReturn(headersSpec);
+    when(headersSpec.header(eq(HttpHeaders.AUTHORIZATION), anyString())).thenReturn(headersSpec);
+    when(headersSpec.header(eq("api-version"), anyString())).thenReturn(headersSpec);
+    when(headersSpec.accept(MediaType.APPLICATION_OCTET_STREAM)).thenReturn(headersSpec);
+    when(headersSpec.retrieve()).thenReturn(responseSpec);
 
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
+    // Simulate onStatus match for 4xx
+    when(responseSpec.onStatus(any(), any())).thenAnswer(invocation -> {
+        Predicate<HttpStatus> predicate = invocation.getArgument(0);
+        Function<ClientResponse, Mono<? extends Throwable>> errorFunction = invocation.getArgument(1);
 
-import java.nio.ByteBuffer;
-import java.util.List;
+        // Return a new responseSpec that throws exception via onStatus
+        when(clientResponse.statusCode()).thenReturn(HttpStatus.BAD_REQUEST);
+        when(clientResponse.bodyToMono(String.class)).thenReturn(Mono.just("Bad Request"));
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.*;
+        return WebClient.ResponseSpec.class.cast(
+            new WebClient.ResponseSpec() {
+                @Override
+                public <T> Mono<T> bodyToMono(Class<T> aClass) {
+                    return Mono.error(new RuntimeException("Failed to download from blob: 400 BAD_REQUEST"));
+                }
 
-class BbgFileDownloadServiceTest {
+                @Override
+                public <T> Flux<T> bodyToFlux(Class<T> aClass) {
+                    return Flux.error(new RuntimeException("Failed to download from blob: 400 BAD_REQUEST"));
+                }
+
+                @Override
+                public Mono<ResponseEntity<Void>> toBodilessEntity() {
+                    return Mono.empty();
+                }
+            }
+        );
+    });
+
+    // Token mock
+    when(authService.getToken("dl")).thenReturn("mock-token");
+
+    // Act & Assert
+    assertThatThrownBy(() -> service.download("http://fake-url", "dl").blockFirst())
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Failed to download from blob: 400");
+}
+
+
+====
+@ExtendWith(MockitoExtension.class)
+class BbgSseEventHandlerServiceTest {
 
     @Mock
-    private BbgAuthService authService;
+    private DownloadTaskRepository taskRepository;
 
     @Mock
-    private BlobServiceClient blobServiceClient;
-
-    @Mock
-    private EdfKafkaEventService kafkaEventService;
-
-    @Mock
-    private WebClient webClient;
+    private PsrRequestLogRepository logRepository;
 
     @InjectMocks
-    private BbgFileDownloadService service;
-
-    @BeforeEach
-    void setup() {
-        MockitoAnnotations.openMocks(this);
-    }
+    private BbgSseEventHandlerService handlerService;
 
     @Test
-    void testDownloadToBlob_whenBlobDoesNotExist_shouldDownloadAndWrite() throws Exception {
-        // Mock blob logic
-        var blobContainerClient = mock(com.azure.storage.blob.BlobContainerClient.class);
-        var blobClient = mock(com.azure.storage.blob.specialized.BlockBlobClient.class);
-        var blobOutputStream = mock(java.io.OutputStream.class);
+    void shouldHandleSseEventAndSaveTask() {
+        // Given
+        String requestId = "12345";
+        String fileName = "sample-file.csv";
+        String downloadUrl = "https://example.com/download";
+        String vendor = "VENDOR_1";
 
-        when(blobServiceClient.getBlobContainerClient("bloomberg")).thenReturn(blobContainerClient);
-        when(blobContainerClient.getBlobClient(anyString()).getBlockBlobClient()).thenReturn(blobClient);
-        when(blobClient.exists()).thenReturn(false);
-        when(blobClient.getBlobOutputStream()).thenReturn(blobOutputStream);
+        // Construct valid JSON
+        String eventData = """
+        {
+            "@type": "DistributionPublishedActivity",
+            "generated": {
+                "@type": "Distribution",
+                "snapshot": {
+                    "dataset": {
+                        "identifier": "%s"
+                    }
+                },
+                "url": "%s",
+                "name": "%s",
+                "qid": "%s"
+            }
+        }
+        """.formatted(requestId, downloadUrl, fileName, requestId);
 
-        // Stub download call
-        byte[] dummyBytes = "test-data".getBytes();
-        DataBuffer buffer = new DefaultDataBufferFactory().wrap(dummyBytes);
-        doReturn(Flux.just(buffer)).when(service).download(anyString(), anyString());
+        // When
+        Mockito.when(logRepository.getPsrRequestLogEntityByRequestId(requestId)).thenReturn(new PsrRequestLogEntity());
 
-        var result = service.downloadToBlob("url", "requestId", "file", "dl").block();
+        // Then
+        handlerService.handleSseEvent(eventData, vendor);
 
-        assertThat(result.getStatus()).isEqualTo(RequestStatus.DOWNLOAD_SUCCESS);
-        verify(kafkaEventService).createEDFEvent("requestId", result.getPath(), "acquisition.pipeline.succeeded");
-    }
+        // Verify task saved
+        ArgumentCaptor<DownloadTaskEntity> captor = ArgumentCaptor.forClass(DownloadTaskEntity.class);
+        Mockito.verify(taskRepository).save(captor.capture());
 
-    @Test
-    void testDownloadToBlob_whenBlobExists_shouldSkipDownload() {
-        var blobContainerClient = mock(com.azure.storage.blob.BlobContainerClient.class);
-        var blobClient = mock(com.azure.storage.blob.specialized.BlockBlobClient.class);
-
-        when(blobServiceClient.getBlobContainerClient("bloomberg")).thenReturn(blobContainerClient);
-        when(blobContainerClient.getBlobClient(anyString()).getBlockBlobClient()).thenReturn(blobClient);
-        when(blobClient.exists()).thenReturn(true);
-
-        var result = service.downloadToBlob("url", "requestId", "file", "dl").block();
-
-        assertThat(result.getStatus()).isEqualTo(RequestStatus.DOWNLOAD_SKIPPED);
-        assertThat(result.getReason()).contains("duplicate");
-    }
-
-    @Test
-    void testDownloadToBlob_whenException_shouldSetFailedStatus() {
-        var blobContainerClient = mock(com.azure.storage.blob.BlobContainerClient.class);
-        var blobClient = mock(com.azure.storage.blob.specialized.BlockBlobClient.class);
-
-        when(blobServiceClient.getBlobContainerClient("bloomberg")).thenReturn(blobContainerClient);
-        when(blobContainerClient.getBlobClient(anyString()).getBlockBlobClient()).thenReturn(blobClient);
-        when(blobClient.exists()).thenReturn(false);
-        when(blobClient.getBlobOutputStream()).thenThrow(new RuntimeException("write failed"));
-
-        var result = service.downloadToBlob("url", "reqId", "file", "dl").block();
-
-        assertThat(result.getStatus()).isEqualTo(RequestStatus.DOWNLOAD_FAILED);
-        assertThat(result.getReason()).contains("write failed");
-        verify(kafkaEventService).createEDFEvent("reqId", result.getPath(), "acquisition.pipeline.failed");
-    }
-
-    @Test
-    void testDownload_shouldReturnDataBufferFlux() {
-        var uriSpec = mock(WebClient.RequestHeadersUriSpec.class);
-        var headersSpec = mock(WebClient.RequestHeadersSpec.class);
-        var responseSpec = mock(WebClient.ResponseSpec.class);
-
-        when(webClient.get()).thenReturn(uriSpec);
-        when(uriSpec.uri(any())).thenReturn(headersSpec);
-        when(headersSpec.header(eq(HttpHeaders.AUTHORIZATION), anyString())).thenReturn(headersSpec);
-        when(headersSpec.header(eq("api-version"), anyString())).thenReturn(headersSpec);
-        when(headersSpec.accept(MediaType.APPLICATION_OCTET_STREAM)).thenReturn(headersSpec);
-        when(headersSpec.retrieve()).thenReturn(responseSpec);
-        when(responseSpec.onStatus(any(), any())).thenReturn(responseSpec);
-
-        DataBuffer buffer = new DefaultDataBufferFactory().wrap("data".getBytes());
-        when(responseSpec.bodyToFlux(DataBuffer.class)).thenReturn(Flux.just(buffer));
-
-        when(authService.getToken("dl")).thenReturn("mock-token");
-
-        Flux<DataBuffer> result = service.download("http://test-url", "dl");
-
-        List<DataBuffer> buffers = result.collectList().block();
-        assertThat(buffers).isNotEmpty();
+        DownloadTaskEntity savedTask = captor.getValue();
+        assertEquals(requestId, savedTask.getRequestId());
+        assertEquals(downloadUrl, savedTask.getUrl());
+        assertEquals(fileName, savedTask.getFileName());
+        assertEquals("PENDING", savedTask.getStatus());
+        assertEquals(vendor, savedTask.getVendorAccount());
     }
 }
