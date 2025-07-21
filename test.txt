@@ -1,66 +1,41 @@
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.modelmapper.ModelMapper;
-
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import org.junit.jupiter.api.Test;
+import java.time.LocalDateTime;
+import java.util.UUID;
 
-class ModelMapperUtilTest {
+class PsrRequestHelperTest {
 
-    @Mock
-    private ModelMapper modelMapper;
-
-    @InjectMocks
-    private ModelMapperUtil modelMapperUtil;
-
-    private PsrRequestDTO dto;
-    private PsrRequestEntity entity;
-    private PsrRequestLogDTO logDto;
-    private PsrRequestLogEntity logEntity;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-        dto = mock(PsrRequestDTO.class);
-        entity = mock(PsrRequestEntity.class);
-        logDto = mock(PsrRequestLogDTO.class);
-        logEntity = mock(PsrRequestLogEntity.class);
-    }
+    private final PsrRequestHelper helper = new PsrRequestHelper();
 
     @Test
-    void testConvertFromDTOToEntity_PsrRequestEntity() {
-        when(modelMapper.map(dto, PsrRequestEntity.class))
-                .thenReturn(entity);
-        PsrRequestEntity res = modelMapperUtil.convertFromDTOtoEntity(dto);
-        assertEquals(entity, res);
-        verify(modelMapper, times(1)).map(dto, PsrRequestEntity.class);
-    }
+    void testBuildPsrRequestLogDTO() {
+        // Arrange
+        String expectedStatus = "COMPLETED";
 
-    @Test
-    void testConvertFromDTOToEntity_PsrRequestLogEntity() {
-        when(modelMapper.map(dto, PsrRequestLogEntity.class))
-                .thenReturn(logEntity);
-        PsrRequestLogEntity result = modelMapperUtil.convertFromDTOtoEntity(dto);
-        assertEquals(logEntity, result);
-        verify(modelMapper).map(dto, PsrRequestLogEntity.class);
-    }
+        PsrRequestLogDTO inputDto = new PsrRequestLogDTO();
+        inputDto.setDL("DownloadLogic");
+        inputDto.setAcqRequestId("Acq123");
+        inputDto.setRequestedby("tester");
+        inputDto.setBbgRequestId("Bbg456");
 
-    @Test
-    void testConvertFromEntityToDTO_PsrRequestLogDTO() {
-        when(modelMapper.map(logEntity, PsrRequestLogDTO.class))
-                .thenReturn(logDto);
-        PsrRequestLogDTO result = modelMapperUtil.convertFromEntityToDTO(logEntity);
-        assertEquals(logDto, result);
-        verify(modelMapper).map(logEntity, PsrRequestLogDTO.class);
-    }
+        // Act
+        PsrRequestLogDTO result = helper.buildPsrRequestLogDTO(expectedStatus, inputDto);
 
-    @Test
-    void testInit() {
-        ModelMapperUtil mmu = new ModelMapperUtil();
-        mmu.init();
-        // Further assertions could verify instantiation if needed, but this guarantees init method coverage.
+        // Assert
+        assertNotNull(result, "Resulting DTO should not be null");
+
+        assertNotNull(result.getId(), "ID should not be null");
+        // UUID substring starting from index 9 should have length 32 - 9 = 23
+        // Actually UUID.toString() length is 36, substring(9) length = 27
+        assertEquals(UUID.randomUUID().toString().length() - 9, result.getId().length(),
+            "ID length should be UUID substring starting at index 9");
+
+        assertEquals(expectedStatus, result.getStatus(), "Status should match input status");
+        assertNotNull(result.getCreatedAt(), "createdAt should be set");
+
+        assertEquals(inputDto.getDL(), result.getDL(), "DL field should be copied");
+        assertEquals(inputDto.getAcqRequestId(), result.getAcqRequestId(), "AcqRequestId should be copied");
+        assertEquals(inputDto.getRequestedby(), result.getRequestedby(), "Requestedby should be copied");
+        assertEquals(inputDto.getBbgRequestId(), result.getBbgRequestId(), "BbgRequestId should be copied");
     }
 }
