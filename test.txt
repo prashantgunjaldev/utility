@@ -1,47 +1,66 @@
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.modelmapper.ModelMapper;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
-class GeneralUtilTest {
+class ModelMapperUtilTest {
 
-    @Test
-    void testIsMasterPod_HostnameEndsWithZero() {
-        // Hostname like "service-0" splits on "-" and last part is "0"
-        assertTrue(GeneralUtil.isMasterPod("service-0"));
+    @Mock
+    private ModelMapper modelMapper;
+
+    @InjectMocks
+    private ModelMapperUtil modelMapperUtil;
+
+    private PsrRequestDTO dto;
+    private PsrRequestEntity entity;
+    private PsrRequestLogDTO logDto;
+    private PsrRequestLogEntity logEntity;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        dto = mock(PsrRequestDTO.class);
+        entity = mock(PsrRequestEntity.class);
+        logDto = mock(PsrRequestLogDTO.class);
+        logEntity = mock(PsrRequestLogEntity.class);
     }
 
     @Test
-    void testIsMasterPod_HostnameEndsWithNonZero() {
-        // Hostname like "service-1" should return false (not master)
-        assertFalse(GeneralUtil.isMasterPod("service-1"));
+    void testConvertFromDTOToEntity_PsrRequestEntity() {
+        when(modelMapper.map(dto, PsrRequestEntity.class))
+                .thenReturn(entity);
+        PsrRequestEntity res = modelMapperUtil.convertFromDTOtoEntity(dto);
+        assertEquals(entity, res);
+        verify(modelMapper, times(1)).map(dto, PsrRequestEntity.class);
     }
 
     @Test
-    void testIsMasterPod_HostnameDoesNotContainDash() {
-        // Hostname doesn't contain '-', so returns false
-        assertFalse(GeneralUtil.isMasterPod("service0"));
+    void testConvertFromDTOToEntity_PsrRequestLogEntity() {
+        when(modelMapper.map(dto, PsrRequestLogEntity.class))
+                .thenReturn(logEntity);
+        PsrRequestLogEntity result = modelMapperUtil.convertFromDTOtoEntity(dto);
+        assertEquals(logEntity, result);
+        verify(modelMapper).map(dto, PsrRequestLogEntity.class);
     }
 
     @Test
-    void testIsMasterPod_NullHostname() {
-        // Null hostname edge case
-        assertFalse(GeneralUtil.isMasterPod(null));
+    void testConvertFromEntityToDTO_PsrRequestLogDTO() {
+        when(modelMapper.map(logEntity, PsrRequestLogDTO.class))
+                .thenReturn(logDto);
+        PsrRequestLogDTO result = modelMapperUtil.convertFromEntityToDTO(logEntity);
+        assertEquals(logDto, result);
+        verify(modelMapper).map(logEntity, PsrRequestLogDTO.class);
     }
 
     @Test
-    void testIsMasterPod_HostnameWithNonNumericSuffix() {
-        // Hostname like "service-x", last chunk not parseable int: triggers catch block
-        assertFalse(GeneralUtil.isMasterPod("service-x"));
-    }
-
-    @Test
-    void testIsMasterPod_HostnameWithMultipleDashes() {
-        // Hostname like "main-service-prod-0" -> last chunk is "0"
-        assertTrue(GeneralUtil.isMasterPod("main-service-prod-0"));
-    }
-
-    @Test
-    void testIsMasterPod_HostnameWithMalformedNumericSection() {
-        // Hostname like "svc-prod-aa0" -> last chunk "aa0" not a pure number: triggers catch
-        assertFalse(GeneralUtil.isMasterPod("svc-prod-aa0"));
+    void testInit() {
+        ModelMapperUtil mmu = new ModelMapperUtil();
+        mmu.init();
+        // Further assertions could verify instantiation if needed, but this guarantees init method coverage.
     }
 }
