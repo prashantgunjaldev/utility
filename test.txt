@@ -1,107 +1,190 @@
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClient.RequestHeadersUriSpec;
+import org.springframework.web.reactive.function.client.WebClient.RequestBodyUriSpec;
 import org.springframework.web.reactive.function.client.WebClient.RequestHeadersSpec;
+import org.springframework.web.reactive.function.client.WebClient.RequestBodySpec;
 import org.springframework.web.reactive.function.client.WebClient.ResponseSpec;
 import reactor.core.publisher.Mono;
 
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class BbgCatalogServiceTest {
+class BbgAuthServiceTest {
 
     @Mock
     private WebClient webClient;
+
     @Mock
-    private RequestHeadersUriSpec<?> uriSpec;
+    private WebClient.RequestBodyUriSpec requestBodyUriSpec;
+
     @Mock
-    private RequestHeadersSpec<?> headersSpec;
+    private WebClient.RequestBodySpec requestBodySpec;
+
     @Mock
-    private ResponseSpec responseSpec;
+    private WebClient.RequestHeadersSpec<?> requestHeadersSpec;
+
+    @Mock
+    private WebClient.ResponseSpec responseSpec;
 
     @InjectMocks
-    private BbgCatalogService service;
+    private BbgAuthService authService;
 
     @BeforeEach
-    void setup() {
+    void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
 
-        // Set @Value fields via reflection
-        ReflectionTestUtils.setField(service, "eapCatalogsUrl", "http://dummy/api");
-        ReflectionTestUtils.setField(service, "requestTimeout", 1);
-        ReflectionTestUtils.setField(service, "maxRetryAttempts", 1);
+        // Set all @Value config fields via reflection
+        ReflectionTestUtils.setField(authService, "authTokenUrl", "https://test/token");
+        ReflectionTestUtils.setField(authService, "requestTimeout", 5);
+        ReflectionTestUtils.setField(authService, "maxRetryAttempts", 1);
+        // Provide a minimal but valid credentials JSON string
+        String credsJson = "{\"dl1\":\"user:pass\"}";
+        ReflectionTestUtils.setField(authService, "credentialsJson", credsJson);
 
-        // Set final webClient via reflection if needed
-        ReflectionTestUtils.setField(service, "webClient", webClient);
-
-        // Chain WebClient mocks
-        when(webClient.get()).thenReturn(uriSpec);
-        when(uriSpec.uri(anyString())).thenReturn(headersSpec);
-        when(headersSpec.header(anyString(), anyString())).thenReturn(headersSpec);
-        when(headersSpec.header(anyString(), anyString(), anyString())).thenReturn(headersSpec);
-        when(headersSpec.retrieve()).thenReturn(responseSpec);
-    }
-
-    @Test
-    void fetchCatalogs_success() {
-        when(responseSpec.bodyToMono(String.class)).thenReturn(Mono.just("{\"contains\":[]}"));
-
-        String result = service.fetchCatalogs("foo");
-        assertEquals("{\"contains\":[]}", result);
-    }
-
-    @Test
-    void fetchCatalogIdViaApiCall_withScheduledType_returnsIdentifier() {
-        String json = "{\"contains\":[{\"subscriptionType\":\"scheduled\",\"identifier\":\"id1\"}]}";
-        BbgCatalogService spy = spy(service);
-        doReturn(json).when(spy).fetchCatalogs(any());
-
-        String id = spy.fetchCatalogIdViaApiCall("dummy");
-        assertEquals("id1", id);
-    }
-
-    @Test
-    void fetchCatalogIdViaApiCall_noValidIdentifier_throwsException() {
-        String json = "{\"contains\":[{\"subscriptionType\":\"notscheduled\",\"identifier\":\"id2\"}]}";
-        BbgCatalogService spy = spy(service);
-        doReturn(json).when(spy).fetchCatalogs(any());
-
-        Exception e = assertThrows(RuntimeException.class, () -> spy.fetchCatalogIdViaApiCall("dummy"));
-        assertTrue(e.getMessage().contains("Failed to obtain catalog identifier"));
-    }
-
-    @Test
-    void fetchCatalogIdViaApiCall_nullResponse_throwsException() {
-        BbgCatalogService spy = spy(service);
-        doReturn(null).when(spy).fetchCatalogs(any());
-
-        Exception e = assertThrows(RuntimeException.class, () -> spy.fetchCatalogIdViaApiCall("dummy"));
-        assertTrue(e.getMessage().contains("Failed to obtain catalog identifier"));
-    }
-
-    @Test
-    void getCatalogId_cachesResultsAndCallsApiOnce() throws Exception {
-        String dl = "abc";
-        BbgCatalogService spy = spy(service);
-        doReturn("id42").when(spy).fetchCatalogIdViaApiCall(dl);
-
-        // Clear cache for clean test run
-        Field f = BbgCatalogService.class.getDeclaredField("catalogIdMap");
+        // Set internal webClient field manually (constructor-injected final)
+        Field f = BbgAuthService.class.getDeclaredField("webClient");
         f.setAccessible(true);
-        ((Map<?, ?>) f.get(spy)).clear();
+        f.set(authService, webClient);
 
-        String id1 = spy.getCatalogId(dl);
-        String id2 = spy.getCatalogId(dl);
+        // Re-initialize internals such as credentials and cache
+        ReflectionTestUtils.invokeMethod(authService, "mapDLs");
+    }
 
-        assertEquals("id42", id1);
-        assertEquals("id42", id2);
-        verify(spy, times(1)).fetchCatalogIdViaApiCall(dl);
+    @Test
+    void testMapDLs_initializesCredentialsAndCache() throws Exception {
+        Field c = BbgAuthService.class.getDeclaredField("credentials");
+        c.setAccessible(true);
+        Map<String, String> creds = (Map<String, String>) c.get(authService);
+        assertNotNull(creds);
+        assertEquals("user:pass", creds.get("dl1"));
+
+        Field m = BbgAuthService.class.getDeclaredField("tokenCacheMap");
+        m.setAccessible(true);
+        Map<String, AtomicReference<?>> map = (Map<String, AtomicReference<?>>) m.get(authService);
+        assertNotNull(map.get("dl1"));
+    }
+
+    @Test
+    void testGetDLList_returnsKeySet() {
+        List<String> list = authService.getDLList();
+        assertEquals(Collections.singletonList("dl1"), list);
+    }
+
+    @Test
+    void testCreateAuthHeaderString_encodesProperly() {
+        String result = ReflectionTestUtils.invokeMethod(authService, "createAuthHeaderString", "dl1");
+        String decoded = new String(Base64.getDecoder().decode(result.substring(6)), StandardCharsets.UTF_8);
+        assertEquals("user:pass", decoded);
+        assertTrue(result.startsWith("Basic "));
+    }
+
+    @Test
+    void testGetToken_cacheHit() {
+        // Arrange: simulate AtomicReference containing valid cached token
+        Field mapField = ReflectionTestUtils.findField(BbgAuthService.class, "tokenCacheMap");
+        assert mapField != null;
+        mapField.setAccessible(true);
+
+        Map<String, AtomicReference<BbgCachedAuthToken>> cacheMap = (Map<String, AtomicReference<BbgCachedAuthToken>>) mapField.get(authService);
+
+        BbgCachedAuthToken token = new BbgCachedAuthToken("access", java.time.Instant.now().plusSeconds(300));
+        cacheMap.get("dl1").set(token);
+
+        // Act
+        String val = authService.getToken("dl1");
+
+        // Assert
+        assertEquals("access", val);
+    }
+    
+    @Test
+    void testGetToken_cacheMiss_callsRefresh() throws Exception {
+        // Arrange: force cache to be empty
+        Field mapField = ReflectionTestUtils.findField(BbgAuthService.class, "tokenCacheMap");
+        mapField.setAccessible(true);
+        Map<String, AtomicReference<BbgCachedAuthToken>> cacheMap = (Map<String, AtomicReference<BbgCachedAuthToken>>) mapField.get(authService);
+        cacheMap.get("dl1").set(null);
+
+        // Spy to verify if refresh is indeed called
+        BbgAuthService spy = Mockito.spy(authService);
+        doReturn("newtoken").when(spy).refresh("dl1");
+
+        // Act
+        String result = spy.getToken("dl1");
+
+        // Assert: fallback to refresh
+        assertEquals("newtoken", result);
+        verify(spy, times(1)).refresh("dl1");
+    }
+
+    @Test
+    void testRefresh_successfulSetsTokenAndReturnsAccessToken() {
+        // Mock downstream getNewAccessToken
+        BbgAuthService spy = Mockito.spy(authService);
+        BbgTokenResponse resp = new BbgTokenResponse();
+        resp.setAccess_token("tok123");
+        resp.setExpires_in(299);
+
+        doReturn(Mono.just(resp)).when(spy).getNewAccessToken(anyString());
+
+        String result = spy.refresh("dl1");
+        assertEquals("tok123", result);
+    }
+
+    @Test
+    void testRefresh_returnsNullOnTokenFailure() {
+        BbgAuthService spy = Mockito.spy(authService);
+        doReturn(Mono.empty()).when(spy).getNewAccessToken(anyString());
+        String result = spy.refresh("dl1");
+        assertNull(result);
+    }
+
+    @Test
+    void testGetNewAccessToken_goodResponse() {
+        // Arrange webClient mock chain
+        when(webClient.post()).thenReturn(requestBodyUriSpec);
+        when(requestBodyUriSpec.uri(anyString())).thenReturn(requestBodySpec);
+        when(requestBodySpec.header(anyString(), anyString())).thenReturn(requestBodySpec);
+        when(requestBodySpec.body(any(BodyInserters.FromFormData.class))).thenReturn(requestHeadersSpec);
+        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
+        BbgTokenResponse resp = new BbgTokenResponse();
+        resp.setAccess_token("tok123");
+        resp.setExpires_in(60);
+        when(responseSpec.bodyToMono(eq(BbgTokenResponse.class))).thenReturn(Mono.just(resp));
+        // Act & Assert
+        Mono<BbgTokenResponse> mono = ReflectionTestUtils.invokeMethod(authService, "getNewAccessToken", "dl1");
+        assertNotNull(mono);
+        BbgTokenResponse out = mono.block();
+        assertEquals("tok123", out.getAccess_token());
+    }
+
+    @Test
+    void testMapDLs_handlesJsonException() throws Exception {
+        // Force credentialsJson to be invalid JSON
+        ReflectionTestUtils.setField(authService, "credentialsJson", "{");
+
+        // Expose method via reflection
+        Exception e = assertThrows(RuntimeException.class, () -> {
+            ReflectionTestUtils.invokeMethod(authService, "mapDLs");
+        });
+        assertTrue(e.getMessage().contains("Unexpected end-of-input"));
     }
 }
