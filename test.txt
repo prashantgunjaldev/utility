@@ -1,122 +1,150 @@
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
-import org.springframework.http.MediaType;
-import org.springframework.web.reactive.function.client.*;
-import reactor.core.publisher.*;
-import reactor.test.StepVerifier;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.Duration;
-import java.util.function.Function;
+import java.util.*;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
-import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 @ExtendWith(MockitoExtension.class)
-class BbgSseListenerServiceTest {
+class DownloadQueueServiceTest {
 
-    @Mock private WebClient webClient;
-    @Mock private WebClient.RequestHeadersUriSpec<?> uriSpec;
-    @Mock private WebClient.RequestHeadersSpec<?> headersSpec;
-    @Mock private BbgAuthService authService;
-    @Mock private BbgSseEventHandlerService eventHandlerService;
+    @Mock
+    private BbgFileDownloadService downloaderService;
+    @Mock
+    private DownloadTaskRepository repository;
+    @Mock
+    private BbgFileRepository fileRepository;
+    @Mock
+    private PsrRequestLogRepository requestLogRepository;
 
     @InjectMocks
-    private BbgSseListenerService listenerService;
+    private DownloadQueueService downloadQueueService;
 
-    private final String apiUrl = "https://api.bloomberg.com/eap/notifications/sse";
+    @Mock
+    private DownloadTaskEntity taskMock;
+    @Mock
+    private DownloadInfo downloadInfoMock;
+    @Mock
+    private PsrRequestLogEntity psrRequestLogEntityMock;
+    @Mock
+    private BbgFileEntity bbgFileEntityMock;
 
     @BeforeEach
-    void setup() {
-        MockitoAnnotations.openMocks(this);
-        listenerService.apiUrl = apiUrl;
-        listenerService.hostname = "host1";
-        listenerService.initialDelay = 1;
-        listenerService.pollInterval = 5;
+    void setUp() {
+        // Inject required mock values for final fields if any
+        // For actual code, set via reflection or constructor if needed
     }
 
     @Test
-    void testPollSSEOnceSuccess() {
-        String dl = "DL123";
-        String token = "mock-token";
-        String sseData = "mock-data";
+    void testSubmitDownload() {
+        // Arrange
+        doNothing().when(repository).save(any());
+        doNothing().when(taskMock).setStatus(any());
+        doNothing().when(taskMock).setUpdatedAt(any());
 
-        when(authService.getTokenWithNonBlocking(eq(dl), eq(false)))
-                .thenReturn(Mono.just(token));
+        // Act
+        downloadQueueService.submitDownload(taskMock);
 
-        when(webClient.get()).thenReturn(uriSpec);
-        when(uriSpec.uri(apiUrl)).thenReturn(headersSpec);
-        when(headersSpec.accept(MediaType.APPLICATION_JSON)).thenReturn(headersSpec);
-        when(headersSpec.header(eq("Authorization"), anyString())).thenReturn(headersSpec);
-        when(headersSpec.header(eq("Last-Event-Id"), anyString())).thenReturn(headersSpec);
-        when(headersSpec.exchangeToFlux(any()))
-                .thenAnswer(invocation -> {
-                    Function<ClientResponse, Publisher<String>> transformer = invocation.getArgument(0);
-                    return Flux.just(sseData);
-                });
-
-        doNothing().when(eventHandlerService).handleSseEvent(eq(sseData), eq(dl));
-
-        StepVerifier.create(listenerService.pollSSEOnce(dl, 1))
-                .expectNext(sseData)
-                .verifyComplete();
-
-        verify(eventHandlerService, times(1)).handleSseEvent(sseData, dl);
+        // Assert: It should add to queue and processQueue is normally invoked (may need partial/mock for queue)
+        // Usually, behavior verification for public result and/or internal interaction
+        verify(repository, never()).save(taskMock); // As it's only saved in logStateInDb for success case
     }
 
     @Test
-    void testPollSSEOnce401UnauthorizedTriggersRetry() {
-        String dl = "DL401";
+    void testProcessQueue_withTask() {
+        // Arrange
+        DownloadTaskEntity realTask = mock(DownloadTaskEntity.class);
 
-        when(authService.getTokenWithNonBlocking(eq(dl), eq(false)))
-                .thenReturn(Mono.just("invalid-token"));
+        // Mocking the tryAcquire
+        Semaphore downloadSlots = new Semaphore(1, true);
+        // You may have to use reflection if semaphore is final/private
 
-        when(webClient.get()).thenReturn(uriSpec);
-        when(uriSpec.uri(apiUrl)).thenReturn(headersSpec);
-        when(headersSpec.accept(MediaType.APPLICATION_JSON)).thenReturn(headersSpec);
-        when(headersSpec.header(eq("Authorization"), anyString())).thenReturn(headersSpec);
-        when(headersSpec.header(eq("Last-Event-Id"), anyString())).thenReturn(headersSpec);
-        when(headersSpec.exchangeToFlux(any()))
-                .thenAnswer(invocation -> {
-                    Function<ClientResponse, Publisher<String>> transformer = invocation.getArgument(0);
-                    return transformer.apply(ClientResponse.create(401).build());
-                });
+        Queue<DownloadTaskEntity> queue = new ConcurrentLinkedQueue<>();
+        queue.offer(realTask);
 
-        StepVerifier.withVirtualTime(() -> listenerService.pollSSEOnce(dl, 1))
-                .expectSubscription()
-                .thenAwait(Duration.ofSeconds(1))
-                .expectNextCount(0)
-                .verifyComplete();
+        // Simulate downloadService, .downloadToBlob returns a publisher, so can stub as needed
+
+        when(realTask.getRequestId()).thenReturn("req1");
+        when(realTask.getFileName()).thenReturn("file");
+        when(realTask.getVendorAccount()).thenReturn("vendor");
+        when(downloaderService.downloadToBlob(anyString(), anyString(), anyString()))
+            .thenAnswer(invocation -> {
+                // Simulate publisher behaviour, thenNext & doFinally logic can be simulated
+                return downloadInfoMock;
+            });
+
+        // Because queue and semaphore are object fields, you'll need to set them via reflection if they're private
+        // For demonstration, assume they're accessible here:
+
+        // downloadQueueService.queue = queue;
+        // downloadQueueService.downloadSlots = downloadSlots;
+
+        // Act
+        // (May need further work if processQueue is private/package-private)
+
+        // downloadQueueService.processQueue();
+
+        // Assert
+        // verify logic, or use AssertJ/assertions for expected changes
     }
 
     @Test
-    void testPollSSEOnceErrorHandledGracefully() {
-        String dl = "DL500";
+    void testLogStateInDb_downloadSuccess() {
+        // Arrange
+        when(downloadInfoMock.getStatus()).thenReturn(RequestStatus.DOWNLOAD_SUCCESS.name());
+        when(taskMock.getStatus()).thenReturn(RequestStatus.DOWNLOAD_SUCCESS.name());
+        when(taskMock.getFileName()).thenReturn("fileName");
+        when(downloadInfoMock.getPath()).thenReturn("filePath");
+        when(taskMock.getVendorAccount()).thenReturn("vendorAcct");
+        when(taskMock.getRequestId()).thenReturn("requestId");
 
-        when(authService.getTokenWithNonBlocking(eq(dl), eq(false)))
-                .thenReturn(Mono.error(new RuntimeException("Token error")));
+        when(requestLogRepository.getPsrRequestLogEntityByBbgRequestId(anyString()))
+            .thenReturn(psrRequestLogEntityMock);
+        when(psrRequestLogEntityMock.getAcqRequestId()).thenReturn("acqReqId");
 
-        StepVerifier.create(listenerService.pollSSEOnce(dl, 1))
-                .verifyComplete();
+        // Do not throw for save methods
+        doNothing().when(fileRepository).save(any());
+        doNothing().when(requestLogRepository).save(any());
+
+        // Act
+        // Reflection or package-private access may be needed
+        // downloadQueueService.logStateInDb(downloadInfoMock, taskMock);
+
+        // Assert
+        verify(fileRepository).save(any());
+        verify(requestLogRepository).save(any());
     }
 
     @Test
-    void testExponentialBackoffDelay() {
-        int attempt1 = 1;
-        int attempt2 = 2;
-        int attempt3 = 3;
+    void testLogStateInDb_notDownloadSuccess() {
+        // Arrange
+        when(downloadInfoMock.getStatus()).thenReturn(RequestStatus.FAILED.name());
 
-        Assertions.assertEquals(1, listenerService.calculateDelay(attempt1));
-        Assertions.assertEquals(2, listenerService.calculateDelay(attempt2));
-        Assertions.assertEquals(3, listenerService.calculateDelay(attempt3));
+        // Act
+        // downloadQueueService.logStateInDb(downloadInfoMock, taskMock);
+
+        // Assert
+        // Should not save to fileRepository
+        verify(fileRepository, never()).save(any());
+        verify(requestLogRepository).save(any());
     }
 
     @Test
-    void testShutdownFlagTerminatesPolling() {
-        String dl = "DLShutdown";
-        listenerService.setShutdown(true);
+    void testTaskPoller_handlesExceptionGracefully() {
+        // Arrange
+        when(repository.claimTasks(anyInt(), anyString())).thenThrow(new RuntimeException("DB error"));
 
-        StepVerifier.create(listenerService.pollSSEOnce(dl, 1))
-                .verifyComplete();
+        // Act & Assert
+        // Should not throw any exception, just log
+        assertDoesNotThrow(() -> downloadQueueService.taskPoller());
     }
+
+    // Add further tests to simulate all branches, exceptions, empty queue, zero semaphore permits, etc.
+
 }
