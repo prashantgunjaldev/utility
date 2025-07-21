@@ -1,41 +1,54 @@
+import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import java.time.LocalDateTime;
+import org.mockito.*;
 import java.util.UUID;
 
-class PsrRequestHelperTest {
+class PsrRequestLoggerServiceTest {
 
-    private final PsrRequestHelper helper = new PsrRequestHelper();
+    @Mock
+    private PsrRequestLogRepository psrRequestLogRepository;
+    @Mock
+    private ModelMapperUtil modelMapperUtil;
+    @Mock
+    private PsrRequestHelper psrRequestHelper;
+
+    @InjectMocks
+    private PsrRequestLoggerService service;
+
+    @BeforeEach
+    void setup() {
+        MockitoAnnotations.openMocks(this);
+    }
 
     @Test
-    void testBuildPsrRequestLogDTO() {
-        // Arrange
-        String expectedStatus = "COMPLETED";
+    void testGetPsrRequestLogEntityByAcqRequestId_ReturnsNewDtoWhenEntityNull() {
+        // Entity found returns null from repo
+        when(psrRequestLogRepository.getPsrRequestLogEntityByAcqRequestId("abc")).thenReturn(null);
 
-        PsrRequestLogDTO inputDto = new PsrRequestLogDTO();
-        inputDto.setDL("DownloadLogic");
-        inputDto.setAcqRequestId("Acq123");
-        inputDto.setRequestedby("tester");
-        inputDto.setBbgRequestId("Bbg456");
+        var result = service.getPsrRequestLogEntityByAcqRequestId("abc");
+        assertNotNull(result);
+        // If not found, should return a new DTO, not from mapper
+        verify(modelMapperUtil, never()).convertFromEntityToDTO(any());
+    }
 
-        // Act
-        PsrRequestLogDTO result = helper.buildPsrRequestLogDTO(expectedStatus, inputDto);
+    @Test
+    void testLogState_withRemark_SetsRemarkAndSaves() {
+        String status = "TEST";
+        PsrRequestLogDTO dto = new PsrRequestLogDTO();
+        String remark = "Something went wrong";
+        PsrRequestLogDTO builtDto = new PsrRequestLogDTO();
 
-        // Assert
-        assertNotNull(result, "Resulting DTO should not be null");
+        when(psrRequestHelper.buildPsrRequestLogDTO(status, dto)).thenReturn(builtDto);
 
-        assertNotNull(result.getId(), "ID should not be null");
-        // UUID substring starting from index 9 should have length 32 - 9 = 23
-        // Actually UUID.toString() length is 36, substring(9) length = 27
-        assertEquals(UUID.randomUUID().toString().length() - 9, result.getId().length(),
-            "ID length should be UUID substring starting at index 9");
+        PsrRequestLoggerService spyService = Mockito.spy(service);
 
-        assertEquals(expectedStatus, result.getStatus(), "Status should match input status");
-        assertNotNull(result.getCreatedAt(), "createdAt should be set");
+        doNothing().when(spyService).save(builtDto);
 
-        assertEquals(inputDto.getDL(), result.getDL(), "DL field should be copied");
-        assertEquals(inputDto.getAcqRequestId(), result.getAcqRequestId(), "AcqRequestId should be copied");
-        assertEquals(inputDto.getRequestedby(), result.getRequestedby(), "Requestedby should be copied");
-        assertEquals(inputDto.getBbgRequestId(), result.getBbgRequestId(), "BbgRequestId should be copied");
+        spyService.logState(status, dto, remark);
+
+        assertEquals(remark, builtDto.getRemarks());
+        verify(spyService).save(builtDto);
     }
 }
