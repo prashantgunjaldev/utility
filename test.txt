@@ -1,3 +1,19 @@
+@Mock WebClient webClient;
+@Mock WebClient.RequestBodyUriSpec mockRequestBodyUriSpec;
+@Mock WebClient.RequestBodySpec mockRequestBodySpec;
+@Mock WebClient.RequestHeadersSpec<?> mockRequestHeadersSpec;
+@Mock WebClient.ResponseSpec mockResponseSpec;
+
+@BeforeEach
+void setup() {
+    when(webClient.post()).thenReturn(mockRequestBodyUriSpec);
+    when(mockRequestBodyUriSpec.uri(anyString())).thenReturn(mockRequestBodySpec);
+    when(mockRequestBodySpec.header(anyString(), anyString())).thenReturn(mockRequestBodySpec);
+    when(mockRequestBodySpec.body(any(), any(Class.class))).thenReturn(mockRequestHeadersSpec);
+    when(mockRequestHeadersSpec.retrieve()).thenReturn(mockResponseSpec);
+    when(mockResponseSpec.bodyToMono(any())).thenReturn(Mono.just("{\"statusCode\":201}"));
+}
+
 ==
 @ExtendWith(MockitoExtension.class)
 class BbgPsrRequestServiceTest {
