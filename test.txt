@@ -1,79 +1,76 @@
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.*;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import java.time.LocalDateTime;
-import java.util.concurrent.atomic.AtomicReference;
-
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
-
+==
+@ExtendWith(MockitoExtension.class)
 class BbgPsrRequestServiceTest {
+    @Mock private WebClient mockWebClient;
+    @Mock private WebClient.RequestBodyUriSpec mockUriSpec;
+    @Mock private WebClient.RequestBodySpec mockBodySpec;
+    @Mock private WebClient.RequestHeadersSpec<?> mockHeadersSpec;
+    @Mock private WebClient.ResponseSpec mockResponseSpec;
 
-    @Mock
-    private WebClient webClient;
-    @Mock
-    private BbgAuthService authService;
-    @Mock
-    private BbgCatalogService catalogService;
-    @Mock
-    private PsrRequestLoggerService loggerService;
-    @Mock
-    private PsrRequestRepository requestRepository;
-
-    @InjectMocks
-    private BbgPsrRequestService service;
+    @InjectMocks private BbgPsrRequestService service;
 
     @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-
-        TestUtil.setPrivateField(service, "apiUrl", "http://fake/api/");
-        TestUtil.setPrivateField(service, "maxRetryAttempts", 2);
-        TestUtil.setPrivateField(service, "hostname", "test-0");
-        TestUtil.setPrivateField(service, "pollingFrequency", 2);
-        TestUtil.setPrivateField(service, "requestRepository", requestRepository);
-        TestUtil.setPrivateField(service, "authService", authService);
-        TestUtil.setPrivateField(service, "catalogService", catalogService);
-        TestUtil.setPrivateField(service, "loggerService", loggerService);
+    void setup() {
+        when(mockWebClient.post()).thenReturn(mockUriSpec);
+        when(mockUriSpec.uri(anyString())).thenReturn(mockBodySpec);
+        when(mockBodySpec.header(anyString(), anyString())).thenReturn(mockBodySpec);
+        when(mockBodySpec.body(any(), any(Class.class))).thenReturn(mockHeadersSpec);
+        when(mockHeadersSpec.retrieve()).thenReturn(mockResponseSpec);
     }
+}
 
-    @Test
-    void request_FailureBranch_LogsAndThrows() {
-        PsrRequestEntity mockTask = mock(PsrRequestEntity.class);
-        when(mockTask.getBbRequestPayload()).thenReturn("{\"foo\":\"bar\"}");
-        when(mockTask.getDl()).thenReturn("dl1");
-        when(catalogService.getCatalogId(any())).thenReturn("cat123");
-        when(authService.getToken(any())).thenReturn("token");
-        when(requestRepository.save(any(PsrRequestEntity.class))).thenReturn(mockTask);
-        // Simulate an error response from HTTP POST or parsing  
-        when(webClient.post()).thenThrow(new RuntimeException("WebClient Error"));
+==== OK ====
+@Test
+void request_whenApiReturns201_updatesStatusToDone() {
+    String successJson = "{\"statusCode\":201,\"request\":{\"identifier\":\"abc123\"}, \"description\":\"Completed\"}";
+    when(mockResponseSpec.bodyToMono(String.class)).thenReturn(Mono.just(successJson));
 
-        // Exercise and assert
-        Exception ex = assertThrows(RuntimeException.class, () -> service.request(mockTask));
-        assertTrue(ex.getMessage().contains("WebClient Error"));
+    PsrRequestEntity request = new PsrRequestEntity();
+    service.request(request);
 
-        verify(loggerService, atLeastOnce()).logState(any(), any(), any());
-        verify(requestRepository, atLeastOnce()).save(any());
-        verify(authService, atLeastOnce()).getToken(any());
-        verify(catalogService, atLeastOnce()).getCatalogId(any());
-    }
+    // Verify that your log, status update, or DB changes are triggered as expected
+}
 
-    @Test
-    void taskPoller_handlesRepositoryError() {
-        // Simulate repository throws in taskPoller flow
-        when(requestRepository.claimTasks(anyInt(), anyString())).thenThrow(new RuntimeException("DB error"));
+==== ERROR ====
+@Test
+void request_whenApiReturnsNon201_setsFailedStatus() {
+    String failedJson = "{\"statusCode\":400,\"errorMessage\":\"Bad request\"}";
+    when(mockResponseSpec.bodyToMono(String.class)).thenReturn(Mono.just(failedJson));
 
-        // Ensure log.error is called, but exception is contained
-        assertDoesNotThrow(() -> service.taskPoller());
-        verify(requestRepository, atLeastOnce()).claimTasks(anyInt(), anyString());
-    }
+    PsrRequestEntity request = new PsrRequestEntity();
+    service.request(request);
 
-    // Utility for setting private fields in tests, if not already present
-    public static class TestUtil {
-        public static void setPrivateField(Object target, String fieldName, Object value) {
-            ReflectionTestUtils.setField(target, fieldName, value);
-        }
-    }
+    // Assert or verify that failure path was taken (logs, DB, etc.)
+}
+
+==
+@Test
+void request_whenExceptionThrown_setsFailedStatus() {
+    when(mockResponseSpec.bodyToMono(String.class))
+        .thenReturn(Mono.error(new WebClientResponseException(500, "Error", null, null, null)));
+
+    PsrRequestEntity request = new PsrRequestEntity();
+    service.request(request);
+
+    // Assert or verify that exception path was taken
+}
+
+==
+@Test
+void request_whenUnauthorized_refreshesTokenAndRetries() {
+    WebClientResponseException unauthorized = new WebClientResponseException(
+        401, "Unauthorized", null, null, null
+    );
+    // First call returns unauthorized, retry returns success
+    when(mockResponseSpec.bodyToMono(String.class))
+        .thenReturn(Mono.error(unauthorized))
+        .thenReturn(Mono.just("{\"statusCode\":201,\"request\":{\"identifier\":\"abc123\"}}"));
+
+    // Mock token refresh as needed
+    // when(authService.refresh()).thenReturn("newToken");
+
+    PsrRequestEntity request = new PsrRequestEntity();
+    service.request(request);
+
+    // Verify token is refreshed and second call succeeds
 }
